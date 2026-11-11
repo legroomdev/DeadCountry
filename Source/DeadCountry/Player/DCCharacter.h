@@ -260,4 +260,8 @@ protected:
 
 	TWeakObjectPtr<AActor> FocusedActor;
 	float FootstepNoiseTimer = 0.f;
+
+	/** Cosmetic footstep sounds (every machine). */
+	void UpdateFootstepAudio(float DeltaSeconds);
+	float FootstepDistance = 0.f;
 };

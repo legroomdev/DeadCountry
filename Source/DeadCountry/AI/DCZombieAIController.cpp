@@ -92,6 +92,7 @@ void ADCZombieAIController::EnterState(EDCZombieState NewState)
 	}
 
 	Zombie->GetCharacterMovement()->MaxWalkSpeed = (NewState == EDCZombieState::Chase) ? Zombie->ChaseSpeed : Zombie->WalkSpeed;
+	Zombie->SetAlerted(NewState == EDCZombieState::Chase);
 	NextRepathTime = 0.f;
 
 	switch (NewState)

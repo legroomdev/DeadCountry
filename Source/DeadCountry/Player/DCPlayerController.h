@@ -61,6 +61,14 @@ public:
 	UFUNCTION(Exec)
 	void DCSuicide();
 
+	/** Debug console command: DCSpawnZombie [distance cm] spawns a zombie in front of you (host only). */
+	UFUNCTION(Exec)
+	void DCSpawnZombie(float Distance = 400.f);
+
+	/** Debug console command: DCTestFire 6 [delay] fires that many shots, 0.35s apart, where you're looking. */
+	UFUNCTION(Exec)
+	void DCTestFire(int32 Shots = 1, float StartDelay = 0.f);
+
 	/** Debug console command: DCShotIn 8 takes a screenshot after 8 seconds (lets exposure settle). */
 	UFUNCTION(Exec)
 	void DCShotIn(float Seconds);
@@ -80,6 +88,10 @@ protected:
 
 	FText LastMessage;
 	float LastMessageTime = -1000.f;
+
+	int32 TestShotsRemaining = 0;
+	FTimerHandle TestFireTimer;
+	void TestFireOnce();
 
 	virtual void SetupInputComponent() override;
 

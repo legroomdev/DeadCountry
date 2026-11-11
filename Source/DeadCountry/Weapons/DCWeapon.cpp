@@ -3,10 +3,14 @@
 #include "Inventory/DCInventoryComponent.h"
 #include "Inventory/DCItemDefinition.h"
 #include "Player/DCCharacter.h"
+#include "Core/DCAudio.h"
+#include "Weapons/DCShellCasing.h"
+#include "Components/DecalComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "Materials/MaterialInterface.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -21,6 +25,10 @@ namespace DCWeaponP9
 	const float RecoilSpringLength = 7.55f;
 	const float MagDropCm = 16.f;
 	const FName MuzzleSocket(TEXT("Muzzle"));
+	const FName EjectSocket(TEXT("Eject"));
+	const float FlashSeconds = 0.045f;
+
+	enum ESurface : uint8 { SurfaceNone = 0, SurfaceWorld = 1, SurfaceFlesh = 2 };
 
 	FTransform RotateAbout(const FVector& Pivot, const FRotator& Rotation, const FVector& Offset = FVector::ZeroVector)
 	{
@@ -79,6 +87,43 @@ ADCWeapon::ADCWeapon()
 	MagazineMesh = MakePart(this, TEXT("Magazine"), TEXT("/Game/Weapons/P9/SM_P9_Magazine.SM_P9_Magazine"), FrameMesh);
 	RoundMeshes.Add(MakePart(this, TEXT("Round0"), TEXT("/Game/Weapons/P9/SM_P9_Round0.SM_P9_Round0"), MagazineMesh));
 	RoundMeshes.Add(MakePart(this, TEXT("Round1"), TEXT("/Game/Weapons/P9/SM_P9_Round1.SM_P9_Round1"), MagazineMesh));
+
+	// Muzzle flash: a quick orange light plus two crossed emissive cards.
+	MuzzleLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("MuzzleLight"));
+	MuzzleLight->SetupAttachment(FrameMesh, DCWeaponP9::MuzzleSocket);
+	MuzzleLight->SetRelativeLocation(FVector(4.f, 0.f, 0.f));
+	MuzzleLight->SetLightColor(FLinearColor(1.f, 0.62f, 0.3f));
+	MuzzleLight->SetAttenuationRadius(700.f);
+	MuzzleLight->SetCastShadows(false);
+	MuzzleLight->SetIntensity(0.f);
+	MuzzleLight->SetVisibility(false);
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Plane(TEXT("/Engine/BasicShapes/Plane.Plane"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FlashMat(TEXT("/Game/VFX/M_MuzzleFlash.M_MuzzleFlash"));
+	auto MakeFlash = [&](const TCHAR* Name, const FRotator& Rot, const FVector& Scale, const FVector& Offset)
+	{
+		UStaticMeshComponent* Card = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+		Card->SetupAttachment(FrameMesh, DCWeaponP9::MuzzleSocket);
+		Card->SetStaticMesh(Plane.Object);
+		if (FlashMat.Succeeded())
+		{
+			Card->SetMaterial(0, FlashMat.Object);
+		}
+		Card->SetRelativeRotation(Rot);
+		Card->SetRelativeScale3D(Scale);
+		Card->SetRelativeLocation(Offset);
+		Card->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Card->CastShadow = false;
+		Card->SetVisibility(false);
+		return Card;
+	};
+	FlashFront = MakeFlash(TEXT("FlashFront"), FRotator(90.f, 0.f, 0.f), FVector(0.07f), FVector(1.f, 0.f, 0.f));
+	FlashSide = MakeFlash(TEXT("FlashSide"), FRotator(0.f, 0.f, 90.f), FVector(0.13f, 0.06f, 1.f), FVector(6.f, 0.f, 0.f));
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> HoleMat(TEXT("/Game/VFX/M_Decal_BulletHole.M_Decal_BulletHole"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BloodMat(TEXT("/Game/VFX/M_Decal_Blood.M_Decal_Blood"));
+	BulletHoleDecal = HoleMat.Object;
+	BloodDecal = BloodMat.Object;
 
 	WeaponName = NSLOCTEXT("DC", "P9Name", "P9 Service Pistol");
 	AmmoItem = TSoftObjectPtr<UDCItemDefinition>(FSoftObjectPath(TEXT("/Game/Items/DA_Ammo9mm.DA_Ammo9mm")));
@@ -151,11 +196,13 @@ void ADCWeapon::LocalFireShot()
 	if (AmmoInMagazine <= 0)
 	{
 		StopFire();
+		DCAudio::PlayAt(this, EDCSound::DryFire, GetActorLocation());
 		RequestReload();
 		return;
 	}
 
 	LastLocalFireTime = GetWorld()->GetTimeSeconds();
+	PlayShotEffects(); // instant feedback for the shooter; others get it from the multicast
 
 	FVector ViewLocation;
 	FRotator ViewRotation;
@@ -227,21 +274,94 @@ void ADCWeapon::Server_Fire_Implementation(FVector_NetQuantize ClientViewLocatio
 	// Zombies hear this. Loudness 1 at the muzzle.
 	MakeNoise(1.f, Character, Start, NoiseRangeCm);
 
-	Multicast_FireEffects(bHit ? Hit.ImpactPoint : End, bHit);
+	uint8 Surface = DCWeaponP9::SurfaceNone;
+	if (bHit)
+	{
+		Surface = Cast<APawn>(Hit.GetActor()) ? DCWeaponP9::SurfaceFlesh : DCWeaponP9::SurfaceWorld;
+	}
+	Multicast_FireEffects(bHit ? FVector(Hit.ImpactPoint) : End, bHit ? FVector(Hit.ImpactNormal) : -Direction, Surface);
 }
 
-void ADCWeapon::Multicast_FireEffects_Implementation(FVector_NetQuantize End, bool bHit)
+bool ADCWeapon::IsOwnerLocallyControlled() const
 {
-	LastFireVisualTime = GetWorld()->GetTimeSeconds();
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	return Pawn && Pawn->IsLocallyControlled();
+}
 
-	// Placeholder tracer from the muzzle until we have muzzle flash / impact VFX and audio.
+void ADCWeapon::Multicast_FireEffects_Implementation(FVector_NetQuantize End, FVector_NetQuantizeNormal Normal, uint8 Surface)
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	// The shooter already played the report/casing the instant they pulled the trigger.
+	if (!IsOwnerLocallyControlled())
+	{
+		LastFireVisualTime = GetWorld()->GetTimeSeconds();
+		PlayShotEffects();
+	}
+	PlayImpactEffects(End, Normal, Surface);
+}
+
+void ADCWeapon::PlayShotEffects()
+{
 	const FVector Muzzle = FrameMesh->DoesSocketExist(DCWeaponP9::MuzzleSocket)
 		? FrameMesh->GetSocketLocation(DCWeaponP9::MuzzleSocket)
 		: GetActorLocation();
-	DrawDebugLine(GetWorld(), Muzzle, End, FColor(255, 200, 80), false, 0.06f, 0, 0.4f);
-	if (bHit)
+	DCAudio::PlayAt(this, EDCSound::Gunshot, Muzzle);
+
+	if (FrameMesh->DoesSocketExist(DCWeaponP9::EjectSocket))
 	{
-		DrawDebugPoint(GetWorld(), End, 8.f, FColor::Red, false, 1.f);
+		const AActor* Shooter = GetOwner();
+		ADCShellCasing::Eject(GetWorld(), FrameMesh->GetSocketTransform(DCWeaponP9::EjectSocket),
+			Shooter ? Shooter->GetVelocity() : FVector::ZeroVector);
+	}
+}
+
+void ADCWeapon::PlayImpactEffects(const FVector& End, const FVector& Normal, uint8 Surface)
+{
+	if (Surface == DCWeaponP9::SurfaceNone)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	const FVector Muzzle = FrameMesh->DoesSocketExist(DCWeaponP9::MuzzleSocket)
+		? FrameMesh->GetSocketLocation(DCWeaponP9::MuzzleSocket) : GetActorLocation();
+	const FVector ShotDir = (End - Muzzle).GetSafeNormal();
+
+	auto SpawnDecal = [World](UMaterialInterface* Mat, const FVector& Where, const FVector& SurfaceNormal, float Size, float Life)
+	{
+		if (!Mat)
+		{
+			return;
+		}
+		FRotator Rot = (-SurfaceNormal).Rotation();
+		Rot.Roll = FMath::FRandRange(0.f, 360.f);
+		if (UDecalComponent* Decal = UGameplayStatics::SpawnDecalAtLocation(World, Mat, FVector(3.f, Size, Size), Where, Rot, Life))
+		{
+			Decal->SetFadeScreenSize(0.0015f);
+		}
+	};
+
+	if (Surface == DCWeaponP9::SurfaceWorld)
+	{
+		SpawnDecal(BulletHoleDecal, End, Normal, FMath::FRandRange(1.1f, 1.6f), 90.f);
+		DCAudio::PlayAt(this, EDCSound::ImpactDirt, End, 0.8f);
+		return;
+	}
+
+	// Flesh: wet hit, then blood on whatever is behind the target and on the ground below.
+	DCAudio::PlayAt(this, EDCSound::ImpactFlesh, End);
+	FCollisionObjectQueryParams Statics(ECC_WorldStatic);
+	FHitResult Behind;
+	if (World->LineTraceSingleByObjectType(Behind, End, End + ShotDir * 220.f, Statics))
+	{
+		SpawnDecal(BloodDecal, Behind.ImpactPoint, Behind.ImpactNormal, FMath::FRandRange(12.f, 22.f), 120.f);
+	}
+	FHitResult Ground;
+	if (World->LineTraceSingleByObjectType(Ground, End, End - FVector(0.f, 0.f, 400.f), Statics))
+	{
+		SpawnDecal(BloodDecal, Ground.ImpactPoint + ShotDir * FMath::FRandRange(10.f, 60.f), Ground.ImpactNormal, FMath::FRandRange(14.f, 28.f), 120.f);
 	}
 }
 
@@ -371,5 +491,54 @@ void ADCWeapon::UpdateActionVisuals()
 	for (int32 i = 0; i < RoundMeshes.Num(); ++i)
 	{
 		RoundMeshes[i]->SetVisibility(bMagVisible && (bReloading || AmmoInMagazine > i));
+	}
+
+	// Muzzle flash: a couple of frames of light and fire, randomly rotated each shot.
+	const float FlashT = Now - GetLastShotTime();
+	const bool bFlash = FlashT >= 0.f && FlashT < FlashSeconds;
+	if (bFlash && !FlashFront->IsVisible())
+	{
+		const float Spin = FMath::FRandRange(0.f, 360.f);
+		FlashFront->SetRelativeRotation(FRotator(90.f, Spin, 0.f));
+		FlashSide->SetRelativeRotation(FRotator(0.f, 0.f, 90.f + FMath::FRandRange(-20.f, 20.f)));
+		const float Size = FMath::FRandRange(0.85f, 1.2f);
+		FlashFront->SetRelativeScale3D(FVector(0.07f * Size));
+		FlashSide->SetRelativeScale3D(FVector(0.13f * Size, 0.06f * Size, 1.f));
+	}
+	FlashFront->SetVisibility(bFlash);
+	FlashSide->SetVisibility(bFlash);
+	const float LightT = FlashT / 0.07f;
+	const bool bLight = FlashT >= 0.f && LightT < 1.f;
+	MuzzleLight->SetVisibility(bLight);
+	MuzzleLight->SetIntensity(bLight ? 9000.f * (1.f - LightT) : 0.f);
+
+	// Reload sounds keyed to the magazine animation; slide release only if it was locked back.
+	if (bReloading)
+	{
+		if (!bReloadVisualActive)
+		{
+			bReloadVisualActive = true;
+			bPlayedMagOut = bPlayedMagIn = false;
+			bSlideLockedAtReloadStart = AmmoInMagazine <= 0;
+		}
+		const float R = (Now - ReloadStartTime) / FMath::Max(0.01f, ReloadSeconds);
+		if (!bPlayedMagOut && R > 0.02f)
+		{
+			bPlayedMagOut = true;
+			DCAudio::PlayAt(this, EDCSound::MagOut, GetActorLocation());
+		}
+		if (!bPlayedMagIn && R > 0.9f)
+		{
+			bPlayedMagIn = true;
+			DCAudio::PlayAt(this, EDCSound::MagIn, GetActorLocation());
+		}
+	}
+	else if (bReloadVisualActive)
+	{
+		bReloadVisualActive = false;
+		if (bSlideLockedAtReloadStart)
+		{
+			DCAudio::PlayAt(this, EDCSound::SlideRelease, GetActorLocation());
+		}
 	}
 }

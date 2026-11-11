@@ -45,7 +45,7 @@ scene.unit_settings.system = 'METRIC'
 
 root_coll = scene.collection
 COLL = {}
-for name in ("Frame", "Slide", "Barrel", "Action", "Magazine", "Sockets", "_Cutters"):
+for name in ("Frame", "Slide", "Barrel", "Action", "Magazine", "Effects", "Sockets", "_Cutters"):
     c = bpy.data.collections.new(name)
     root_coll.children.link(c)
     COLL[name] = c
@@ -575,6 +575,11 @@ for idx, (lz, ly) in enumerate(((90.0, 2.3), (85.6, -2.3))):
     place = MAG_M @ Matrix.Translation((0.5, ly, lz)) @ Matrix.Rotation(-GRIP_ANGLE, 4, 'Y') @ Matrix.Translation((-14.0, 0, 0))
     rnd.data.transform(place)
 
+# Spent casing for shell ejection (separate asset, origin at the case head, lies along +X)
+EMPTY_CASE_PROFILE = [(0.0, 0.0), (0.0, 4.9), (0.9, 4.9), (1.15, 4.2), (2.0, 4.2), (2.35, 4.96), (19.15, 4.82),
+                      (19.15, 4.55), (2.8, 4.4), (2.8, 0.0)]
+lathe("SM_P9_Casing", EMPTY_CASE_PROFILE, COLL["Effects"], M_BRASS, segs=20)
+
 # ===========================================================================
 # Sockets (UE imports empties named SOCKET_* as static-mesh sockets)
 # ===========================================================================
@@ -659,7 +664,9 @@ for cname in ("Frame", "Slide", "Barrel", "Action", "Magazine"):
     if cname == "Frame":
         objs += list(COLL["Sockets"].objects)
     export(objs, os.path.join(EXPORT_DIR, f"SM_P9_{cname}.fbx"))
-export([o for o in scene.objects], os.path.join(EXPORT_DIR, "P9_All.fbx"))
+effects = set(COLL["Effects"].objects)
+export([o for o in scene.objects if o not in effects], os.path.join(EXPORT_DIR, "P9_All.fbx"))
+export(list(effects), os.path.join(EXPORT_DIR, "SM_P9_Casing.fbx"))
 print("[P9] exported FBX to " + EXPORT_DIR)
 
 # ===========================================================================
@@ -680,6 +687,7 @@ scene.world = world
 world.color = (0.55, 0.55, 0.57)
 scene.display.shading.background_type = 'WORLD'
 COLL["Sockets"].hide_render = True
+COLL["Effects"].hide_render = True
 
 cam_data = bpy.data.cameras.new("Cam")
 cam = bpy.data.objects.new("Cam", cam_data)

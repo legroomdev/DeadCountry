@@ -9,6 +9,7 @@
 #include "Weapons/DCWeapon.h"
 #include "World/DCWorldItem.h"
 #include "World/DCLootContainer.h"
+#include "Core/DCAudio.h"
 #include "Survival/DCSurvivalGameMode.h"
 #include "Survival/DCPlayerState.h"
 #include "Survival/DCWorldSave.h"
@@ -366,6 +367,26 @@ void ADCCharacter::OnRep_Aiming()
 	UpdateMovementSpeed();
 }
 
+void ADCCharacter::UpdateFootstepAudio(float DeltaSeconds)
+{
+	const UCharacterMovementComponent* Move = GetCharacterMovement();
+	const float Speed = GetVelocity().Size2D();
+	if (bSleeping || IsDead() || !Move->IsMovingOnGround() || Speed < 40.f)
+	{
+		FootstepDistance = 0.f;
+		return;
+	}
+	FootstepDistance += Speed * DeltaSeconds;
+	const float Stride = bIsCrouched ? 75.f : (bIsSprinting ? 175.f : 135.f);
+	if (FootstepDistance >= Stride)
+	{
+		FootstepDistance = 0.f;
+		const float Volume = bIsCrouched ? 0.18f : (bIsSprinting ? 1.f : 0.55f);
+		const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		DCAudio::PlayAt(this, EDCSound::Footstep, Feet, Volume);
+	}
+}
+
 void ADCCharacter::ApplyRecoil(float PitchKick, float YawKick, float RecoverFraction)
 {
 	AController* MyController = GetController();
@@ -441,6 +462,7 @@ void ADCCharacter::Tick(float DeltaSeconds)
 		UpdateRecoilRecovery(DeltaSeconds);
 	}
 	UpdateAimVisuals(DeltaSeconds);
+	UpdateFootstepAudio(DeltaSeconds);
 
 	if (HasAuthority() && !IsDead())
 	{

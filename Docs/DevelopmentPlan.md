@@ -45,9 +45,10 @@ Milestones are a guide, not a schedule. Each ends with something you can **play 
 ## Milestone 1 — Pivot to survival + safety net (≈ 2–3 weeks) — *in progress*
 
 **Status (2026-11-11):** survival game mode, world clock + day/night, death → new survivor, world save/load (autosave, backup, save on quit/logout/death), fatigue + sleep with time skip, raid code removed, regions in place. Tested: new world → reload restores survivor and clock; death leaves a saved body and the next session starts a new survivor.
-**Still to do:** first git commit (needs author name/email) + GitHub remote; playtest sleep (Z) in-game; multiplayer PIE check of save/respawn.
+**Source control:** git + LFS, backed up to the private repo github.com/legroomdev/DeadCountry (first push 2026-11-11).
+**Still to do:** playtest sleep (Z) in-game; multiplayer PIE check of save/respawn.
 
-Debug console commands: `DCSetHour <h>`, `DCSuicide`, `DCSaveWorld`, `DCForceAim 1`, `DCShotIn <s>`.
+Debug console commands: `DCSetHour <h>`, `DCSuicide`, `DCSaveWorld`, `DCForceAim 1`, `DCShotIn <s>`, `DCSpawnZombie [cm]`, `DCTestFire <shots> [delay]`.
 
 
 1. **Source control** — git + Git LFS, private GitHub repo as backup. *(Do this first.)*
@@ -61,7 +62,14 @@ Debug console commands: `DCSetHour <h>`, `DCSuicide`, `DCSaveWorld`, `DCForceAim
 
 ---
 
-## Milestone 2 — "It feels good" (≈ 3–4 weeks)
+## Milestone 2 — "It feels good" (≈ 3–4 weeks) — *in progress*
+
+**Round 1 done (2026-11-11):** Epic mannequin content in `/Game/Characters` (free, engine-licensed) as placeholder art.
+Zombies use Manny/Quinn with a zombie skin, shamble/lurch/grab animations, per-bone hits (real headshots), ragdoll deaths.
+Synthesized placeholder audio (`Tools/Audio/synth_sounds.py` → `SourceArt/Audio`, imported by `Tools/Import/setup_m2_assets.py`):
+gunshot, dry fire, mag out/in, slide release, casing tinks, footsteps, impacts, zombie groan/alert/attack.
+VFX: muzzle flash cards + light, physics shell casings, bullet-hole and blood decals; debug tracers removed.
+**Round 2 next:** first-person arms, UMG HUD. **Later:** replace placeholder sounds and mannequin zombies with licensed assets.
 
 1. **First-person arms** (licensed) holding the P9: fire, reload, ADS, slide lock, interact/pick-up animations.
 2. **Audio** — gunshots with outdoor tails, footsteps per surface, zombie groans/alerts, doors, ambience (cicadas by day, wind at night). MetaSounds.

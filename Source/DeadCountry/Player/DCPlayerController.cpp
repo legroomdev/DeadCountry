@@ -1,6 +1,8 @@
 #include "Player/DCPlayerController.h"
 #include "Player/DCCharacter.h"
 #include "Health/DCHealthComponent.h"
+#include "AI/DCZombie.h"
+#include "Weapons/DCWeapon.h"
 #include "Inventory/DCInventoryComponent.h"
 #include "TimerManager.h"
 #include "Survival/DCSurvivalGameMode.h"
@@ -164,6 +166,38 @@ void ADCPlayerController::DCSuicide()
 	{
 		Raider->GetHealthComponent()->Kill(nullptr);
 	}
+}
+
+void ADCPlayerController::DCSpawnZombie(float Distance)
+{
+	const APawn* MyPawn = GetPawn();
+	if (!MyPawn || !HasAuthority())
+	{
+		return;
+	}
+	const FRotator Yaw(0.f, GetControlRotation().Yaw, 0.f);
+	const FVector Where = MyPawn->GetActorLocation() + Yaw.Vector() * Distance;
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	GetWorld()->SpawnActor<ADCZombie>(ADCZombie::StaticClass(), Where, Yaw + FRotator(0.f, 180.f, 0.f), Params);
+}
+
+void ADCPlayerController::DCTestFire(int32 Shots, float StartDelay)
+{
+	TestShotsRemaining = FMath::Clamp(Shots, 1, 50);
+	GetWorldTimerManager().SetTimer(TestFireTimer, this, &ADCPlayerController::TestFireOnce, 0.35f, true, FMath::Max(0.f, StartDelay));
+}
+
+void ADCPlayerController::TestFireOnce()
+{
+	ADCCharacter* Raider = GetPawn<ADCCharacter>();
+	if (!Raider || !Raider->GetEquippedWeapon() || --TestShotsRemaining < 0)
+	{
+		GetWorldTimerManager().ClearTimer(TestFireTimer);
+		return;
+	}
+	Raider->GetEquippedWeapon()->StartFire();
+	Raider->GetEquippedWeapon()->StopFire();
 }
 
 void ADCPlayerController::DCShotIn(float Seconds)

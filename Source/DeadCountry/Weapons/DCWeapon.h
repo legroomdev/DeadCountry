@@ -76,6 +76,23 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
 	TArray<TObjectPtr<UStaticMeshComponent>> RoundMeshes;
 
+	// --- Effects ---
+	UPROPERTY(VisibleAnywhere, Category = "Effects")
+	TObjectPtr<class UPointLightComponent> MuzzleLight;
+
+	/** Two crossed emissive cards at the muzzle (front-on star + side plume). */
+	UPROPERTY(VisibleAnywhere, Category = "Effects")
+	TObjectPtr<UStaticMeshComponent> FlashFront;
+
+	UPROPERTY(VisibleAnywhere, Category = "Effects")
+	TObjectPtr<UStaticMeshComponent> FlashSide;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Effects")
+	TObjectPtr<class UMaterialInterface> BulletHoleDecal;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Effects")
+	TObjectPtr<class UMaterialInterface> BloodDecal;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
 	FText WeaponName;
 
@@ -179,7 +196,12 @@ protected:
 	void Server_Reload();
 
 	UFUNCTION(NetMulticast, Unreliable)
-	void Multicast_FireEffects(FVector_NetQuantize End, bool bHit);
+	void Multicast_FireEffects(FVector_NetQuantize End, FVector_NetQuantizeNormal Normal, uint8 Surface);
+
+	/** Muzzle report + casing; played instantly for the shooter, via the multicast for everyone else. */
+	void PlayShotEffects();
+	void PlayImpactEffects(const FVector& End, const FVector& Normal, uint8 Surface);
+	bool IsOwnerLocallyControlled() const;
 
 	virtual void BeginPlay() override;
 
@@ -200,4 +222,10 @@ protected:
 	float LastFireVisualTime = -1000.f;
 	float ReloadStartTime = -1000.f;
 	bool bTriggerHeld = false;
+
+	// Reload sound sequencing (cosmetic)
+	bool bReloadVisualActive = false;
+	bool bPlayedMagOut = false;
+	bool bPlayedMagIn = false;
+	bool bSlideLockedAtReloadStart = false;
 };
