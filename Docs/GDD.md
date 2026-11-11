@@ -37,21 +37,26 @@ Every system is server-authoritative and replicated from day one.
 | Huon Hollow | Tasmanian wilderness | Old-growth forest, logging camp, fog |
 
 ## Code map (`Source/DeadCountry`)
-- `Player/` — `DCCharacter` (first-person raider), `DCPlayerController` (Enhanced Input built in code)
-- `Health/` — `DCHealthComponent` (limbs, bleeds, fractures, infection), `DCSurvivalComponent` (water, energy, stamina)
-- `Inventory/` — `DCItemDefinition` (data asset per item), `DCInventoryComponent` (replicated grid)
-- `Weapons/` — `DCWeapon` (server-validated hitscan, makes noise)
-- `AI/` — `DCZombie`, `DCZombieAIController` (wander → investigate noise → chase)
-- `World/` — `DCWorldItem` (loose pickups), `DCLootContainer` (eskies, shelves, bodies)
-- `Raid/` — `DCRaidGameMode`, `DCRaidGameState`, `DCPlayerState`, `DCExtractionZone`, `DCMapDefinition`
-- `UI/` — `DCHUD` (prototype canvas HUD; to be replaced with UMG)
+- `Player/` — `DCCharacter` (first-person survivor: FP arms, equip, shove/stomp, sleep), `DCPlayerController` (Enhanced Input built in code, debug commands)
+- `Health/` — `DCHealthComponent` (limbs, bleeds, fractures, infection), `DCSurvivalComponent` (water, energy, fatigue, stamina)
+- `Inventory/` — `DCItemDefinition` (data asset per item, incl. melee stats), `DCInventoryComponent` (replicated grid, per-item condition/ammo)
+- `Weapons/` — `DCEquippable` (base for held items), `DCWeapon` (P9 firearm), `DCMeleeWeapon` (data-driven melee), `DCShellCasing`
+- `AI/` — `DCZombie` (mannequin, knockdown/stagger, ragdoll), `DCZombieAIController` (wander → investigate noise → chase)
+- `World/` — `DCWorldItem`, `DCLootContainer`, `DCRegionDefinition`
+- `Survival/` — `DCSurvivalGameMode` (world save, sandbox options, respawn), `DCSurvivalGameState` (clock, day/night), `DCPlayerState`, `DCSkillsComponent`, `DCWorldSave`
+- `UI/` — `DCHUD` + `DCHUDWidget` (C++ UMG HUD)
+- `Core/` — `DCTypes`, `DCAudio`
 
 `Tools/Bootstrap/bootstrap_content.py` rebuilds starter items, map definitions and the greybox test map.
 
 ## Controls (prototype)
 WASD move · Mouse look · Shift sprint · C/Ctrl crouch · Space jump · F interact ·
-LMB fire · RMB aim down sights · R reload · Tab inventory · 1–9 use item (while inventory open) ·
+LMB fire / swing · RMB aim (guns) or shove (melee, bare hands; stomps a downed zombie) · R reload ·
+Tab inventory · 1–9 use or equip an item (while inventory open; equip again to put away) ·
 Z sleep / wake · Enter start a new survivor (after death)
+
+## Sandbox options (new worlds only, as URL options)
+`?World=Name?ZombieSpeed=Shamblers|FastShamblers|Sprinters?Population=1?Infection=1?Loot=1?DayLength=60?XP=1`
 
 ## Roadmap
 See [DevelopmentPlan.md](DevelopmentPlan.md) for milestones.

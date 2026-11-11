@@ -27,10 +27,20 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Item")
 	void SetItem(UDCItemDefinition* NewItem, int32 NewCount);
 
-	static ADCWorldItem* SpawnDropped(UWorld* World, UDCItemDefinition* Item, int32 Count, const FVector& Location, const FRotator& Rotation);
+	static ADCWorldItem* SpawnDropped(UWorld* World, UDCItemDefinition* Item, int32 Count, const FVector& Location, const FRotator& Rotation,
+		float InCondition = -1.f, int32 InLoadedAmmo = -1);
 
 	UDCItemDefinition* GetItem() const { return Item; }
 	int32 GetCount() const { return Count; }
+	float GetCondition() const { return Condition; }
+	int32 GetLoadedAmmo() const { return LoadedAmmo; }
+
+	/** Per-instance state carried by a dropped weapon/tool (-1 = fresh from the item definition). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item")
+	float Condition = -1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Item")
+	int32 LoadedAmmo = -1;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Item")

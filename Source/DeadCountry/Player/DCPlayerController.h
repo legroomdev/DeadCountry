@@ -61,6 +61,10 @@ public:
 	UFUNCTION(Exec)
 	void DCSuicide();
 
+	/** Debug console command: DCUseSlot 3 uses/equips inventory slot 3 (same as Tab + 3). */
+	UFUNCTION(Exec)
+	void DCUseSlot(int32 Slot);
+
 	/** Debug console command: DCArmsDebug [delay] logs first-person arm pose data. */
 	UFUNCTION(Exec)
 	void DCArmsDebug(float Delay = 0.f);

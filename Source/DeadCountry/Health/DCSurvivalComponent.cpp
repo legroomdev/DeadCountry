@@ -2,6 +2,7 @@
 #include "Health/DCHealthComponent.h"
 #include "Player/DCCharacter.h"
 #include "Survival/DCSurvivalGameState.h"
+#include "Survival/DCSkillsComponent.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 
@@ -68,14 +69,15 @@ void UDCSurvivalComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 		Fatigue = FMath::Min(100.f, Fatigue + FatigueGainPerHour * (bSprinting ? 1.5f : 1.f) * GameHours);
 	}
 
-	// Stamina is moment-to-moment, so real time. Being tired halves recovery.
+	// Stamina is moment-to-moment, so real time. Being tired halves recovery; Fitness helps both ways.
+	const int32 Fitness = Character->GetSkillsComponent() ? Character->GetSkillsComponent()->GetLevel(EDCSkill::Fitness) : 0;
 	if (bSprinting)
 	{
-		Stamina = FMath::Max(0.f, Stamina - SprintStaminaDrainPerSecond * DeltaTime);
+		Stamina = FMath::Max(0.f, Stamina - SprintStaminaDrainPerSecond * (1.f - 0.04f * Fitness) * DeltaTime);
 	}
 	else
 	{
-		const float Regen = StaminaRegenPerSecond * (IsTired() ? 0.5f : 1.f);
+		const float Regen = StaminaRegenPerSecond * (IsTired() ? 0.5f : 1.f) * (1.f + 0.06f * Fitness);
 		Stamina = FMath::Min(MaxStamina, Stamina + Regen * DeltaTime);
 	}
 

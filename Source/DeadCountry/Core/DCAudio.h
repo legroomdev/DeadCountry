@@ -17,6 +17,11 @@ enum class EDCSound : uint8
 	ZombieGroan,
 	ZombieAlert,
 	ZombieAttack,
+	MeleeSwing,
+	MeleeHitBlunt,
+	MeleeHitBlade,
+	Shove,
+	WeaponBreak,
 	MAX
 };
 

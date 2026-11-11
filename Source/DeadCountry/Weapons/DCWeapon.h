@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Weapons/DCEquippable.h"
 #include "DCWeapon.generated.h"
 
 class UStaticMeshComponent;
@@ -17,7 +17,7 @@ class UDCItemDefinition;
  * slide cycling / lock-back, barrel tilt, recoil spring compression, trigger pull, mag swap.
  */
 UCLASS()
-class DEADCOUNTRY_API ADCWeapon : public AActor
+class DEADCOUNTRY_API ADCWeapon : public ADCEquippable
 {
 	GENERATED_BODY()
 
@@ -27,10 +27,26 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	// ADCEquippable
+	virtual void StartPrimary() override { StartFire(); }
+	virtual void StopPrimary() override { StopFire(); }
+	virtual void RequestReload() override;
+	virtual bool CanAim() const override { return true; }
+	virtual bool IsBusy() const override { return bReloading; }
+	virtual void GetHeldPose(float AimAlpha, FVector& OutLocation, FRotator& OutRotation) const override;
+	virtual FTransform GetGripTransform() const override;
+	virtual FTransform GetGripLocalTransform() const override;
+	virtual bool WantsReloadArmsPose() const override { return bReloading; }
+	virtual float GetReloadDuration() const override { return CurrentReloadSeconds; }
+	virtual FText GetDisplayName() const override { return WeaponName; }
+	virtual FString GetHudPrimary() const override;
+	virtual FString GetHudSecondary() const override;
+	virtual void InitFromEntry(const FDCInventoryEntry& Entry) override;
+	virtual void GetInstanceData(float& OutCondition, int32& OutLoadedAmmo) const override;
+
 	/** Local input. */
 	void StartFire();
 	void StopFire();
-	void RequestReload();
 
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	int32 GetAmmoInMagazine() const { return AmmoInMagazine; }
@@ -49,14 +65,6 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	FText GetWeaponName() const { return WeaponName; }
-
-	/** World transform of the grip (where the firing hand goes). */
-	FTransform GetGripTransform() const;
-
-	/** Grip relative to the weapon's own origin. */
-	FTransform GetGripLocalTransform() const;
-
-	float GetReloadSeconds() const { return ReloadSeconds; }
 
 	/** Cosmetic gun kick to add on top of the held pose. AimAlpha 0 = hip, 1 = ADS. */
 	void GetVisualRecoil(float AimAlpha, FVector& OutLocation, FRotator& OutRotation) const;
@@ -193,6 +201,10 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Reloading)
 	bool bReloading = false;
+
+	/** This reload's duration after the Reloading skill bonus (replicated so every machine animates in step). */
+	UPROPERTY(Replicated)
+	float CurrentReloadSeconds = 1.9f;
 
 	UFUNCTION()
 	void OnRep_Reloading();

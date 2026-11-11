@@ -61,6 +61,80 @@ void ADCSurvivalGameMode::InitGame(const FString& MapName, const FString& Option
 		WorldName = OptionWorld;
 	}
 	LoadWorldFromDisk();
+	if (WorldSave && WorldSave->GameHours < 0.0)
+	{
+		ParseSandboxOptions(Options); // only a brand-new world takes sandbox options
+	}
+	const FDCSandboxSettings& S = GetSandbox();
+	UE_LOG(LogDC, Log, TEXT("Sandbox: zombies=%s population=x%.2f infection=x%.2f loot=x%.2f day=%.0fmin xp=x%.2f"),
+		*StaticEnum<EDCZombieSpeed>()->GetNameStringByValue(static_cast<int64>(S.ZombieSpeed)),
+		S.ZombiePopulation, S.InfectionChanceScale, S.LootRarity, S.DayLengthMinutes, S.XPMultiplier);
+}
+
+const FDCSandboxSettings& ADCSurvivalGameMode::GetSandbox() const
+{
+	static const FDCSandboxSettings Defaults;
+	return WorldSave ? WorldSave->Sandbox : Defaults;
+}
+
+void ADCSurvivalGameMode::ParseSandboxOptions(const FString& Options)
+{
+	FDCSandboxSettings& S = WorldSave->Sandbox;
+	auto Float = [&Options](const TCHAR* Key, float& Value, float Min, float Max)
+	{
+		const FString Raw = UGameplayStatics::ParseOption(Options, Key);
+		if (!Raw.IsEmpty())
+		{
+			Value = FMath::Clamp(FCString::Atof(*Raw), Min, Max);
+		}
+	};
+	const FString Speed = UGameplayStatics::ParseOption(Options, TEXT("ZombieSpeed"));
+	if (Speed.Equals(TEXT("Sprinters"), ESearchCase::IgnoreCase))
+	{
+		S.ZombieSpeed = EDCZombieSpeed::Sprinters;
+	}
+	else if (Speed.StartsWith(TEXT("Fast"), ESearchCase::IgnoreCase))
+	{
+		S.ZombieSpeed = EDCZombieSpeed::FastShamblers;
+	}
+	Float(TEXT("Population"), S.ZombiePopulation, 0.f, 5.f);
+	Float(TEXT("Infection"), S.InfectionChanceScale, 0.f, 5.f);
+	Float(TEXT("Loot"), S.LootRarity, 0.f, 5.f);
+	Float(TEXT("DayLength"), S.DayLengthMinutes, 5.f, 600.f);
+	Float(TEXT("XP"), S.XPMultiplier, 0.f, 20.f);
+}
+
+void ADCSurvivalGameMode::ApplyStartingPopulation()
+{
+	const float Population = GetSandbox().ZombiePopulation;
+	if (FMath::IsNearlyEqual(Population, 1.f))
+	{
+		return;
+	}
+	TArray<ADCZombie*> Zombies;
+	for (TActorIterator<ADCZombie> It(GetWorld()); It; ++It)
+	{
+		Zombies.Add(*It);
+	}
+	const int32 Target = FMath::RoundToInt(Zombies.Num() * Population);
+	// Thin out...
+	while (Zombies.Num() > Target)
+	{
+		const int32 Index = FMath::RandRange(0, Zombies.Num() - 1);
+		Zombies[Index]->RemoveQuietly();
+		Zombies.RemoveAtSwap(Index);
+	}
+	// ...or add more, clustered around the existing ones.
+	const int32 Originals = Zombies.Num();
+	for (int32 i = Originals; i < Target && Originals > 0; ++i)
+	{
+		const ADCZombie* Near = Zombies[FMath::RandRange(0, Originals - 1)];
+		const FVector Offset(FMath::FRandRange(-400.f, 400.f), FMath::FRandRange(-400.f, 400.f), 0.f);
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
+		GetWorld()->SpawnActor<ADCZombie>(ADCZombie::StaticClass(), Near->GetActorLocation() + Offset,
+			FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f), Params);
+	}
 }
 
 void ADCSurvivalGameMode::StartPlay()
@@ -70,6 +144,7 @@ void ADCSurvivalGameMode::StartPlay()
 	if (ADCSurvivalGameState* GS = GetGameState<ADCSurvivalGameState>())
 	{
 		GS->Region = Region;
+		GS->DayLengthMinutes = GetSandbox().DayLengthMinutes;
 	}
 
 	ApplyWorldState();
@@ -332,8 +407,9 @@ void ADCSurvivalGameMode::ApplyWorldState()
 
 	if (WorldSave->GameHours < 0.0)
 	{
-		// New world: keep the level as authored; start on Day 1 at the region's start hour.
+		// New world: keep the level as authored (scaled by the population option); start on Day 1.
 		GS->SetTotalGameHours(Region ? Region->StartTimeOfDayHours : 7.0);
+		ApplyStartingPopulation();
 		return;
 	}
 
@@ -384,18 +460,15 @@ void ADCSurvivalGameMode::ApplyWorldState()
 	{
 		if (UDCItemDefinition* Item = Cast<UDCItemDefinition>(Saved.Item.TryLoad()))
 		{
-			ADCWorldItem::SpawnDropped(World, Item, Saved.Count, Saved.Transform.GetLocation(), Saved.Transform.Rotator());
+			ADCWorldItem::SpawnDropped(World, Item, Saved.Count, Saved.Transform.GetLocation(), Saved.Transform.Rotator(),
+				Saved.Condition, Saved.LoadedAmmo);
 		}
 	}
 
 	// Zombies: the dead stay dead, the living are where you left them.
 	for (TActorIterator<ADCZombie> It(World); It; ++It)
 	{
-		if (AController* AI = It->GetController())
-		{
-			AI->Destroy();
-		}
-		It->Destroy();
+		It->RemoveQuietly();
 	}
 	for (const FDCSavedZombie& Saved : WorldSave->Zombies)
 	{
@@ -464,6 +537,8 @@ void ADCSurvivalGameMode::CaptureWorldState()
 			Saved.Item = FSoftObjectPath(It->GetItem());
 			Saved.Count = It->GetCount();
 			Saved.Transform = It->GetActorTransform();
+			Saved.Condition = It->GetCondition();
+			Saved.LoadedAmmo = It->GetLoadedAmmo();
 		}
 	}
 

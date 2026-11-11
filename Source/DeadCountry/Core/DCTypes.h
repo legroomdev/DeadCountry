@@ -44,3 +44,32 @@ enum class EDCBiome : uint8
 	RegionalCity        UMETA(DisplayName = "Regional City"),
 	TasmanianWilderness UMETA(DisplayName = "Tasmanian Wilderness")
 };
+
+/** Zomboid-style skills: levelled 0-10 by doing. */
+UENUM(BlueprintType)
+enum class EDCSkill : uint8
+{
+	Aiming,
+	Reloading,
+	ShortBlunt   UMETA(DisplayName = "Short Blunt"),
+	LongBlunt    UMETA(DisplayName = "Long Blunt"),
+	ShortBlade   UMETA(DisplayName = "Short Blade"),
+	LongBlade    UMETA(DisplayName = "Long Blade"),
+	Fitness,
+	Strength,
+	Sneaking,
+	Maintenance,
+	Carpentry,
+	Cooking,
+	FirstAid     UMETA(DisplayName = "First Aid"),
+	MAX          UMETA(Hidden)
+};
+
+/** Sandbox option: how fast the dead move. */
+UENUM(BlueprintType)
+enum class EDCZombieSpeed : uint8
+{
+	Shamblers,
+	FastShamblers UMETA(DisplayName = "Fast Shamblers"),
+	Sprinters
+};

@@ -9,7 +9,8 @@ class UDCHealthComponent;
 class UDCSurvivalComponent;
 class UDCInventoryComponent;
 class UDCItemDefinition;
-class ADCWeapon;
+class ADCEquippable;
+class UDCSkillsComponent;
 struct FInputActionValue;
 struct FDCSavedCharacter;
 
@@ -42,7 +43,17 @@ public:
 	UDCHealthComponent* GetHealthComponent() const { return Health; }
 	UDCSurvivalComponent* GetSurvivalComponent() const { return Survival; }
 	UDCInventoryComponent* GetInventoryComponent() const { return Inventory; }
-	ADCWeapon* GetEquippedWeapon() const { return EquippedWeapon; }
+	UDCSkillsComponent* GetSkillsComponent() const { return Skills; }
+	ADCEquippable* GetEquippedWeapon() const { return EquippedWeapon; }
+
+	/** Server: equip the inventory entry (or put it away if it's already in hand). */
+	void EquipEntry(int32 EntryId);
+
+	/** Server: put away whatever is in hand, writing its state (ammo, condition) back to the item. */
+	void Unequip();
+
+	/** Server: the item in hand just broke - remove it from the inventory and tell the player. */
+	void HandleEquippedBroken();
 
 	UFUNCTION(BlueprintPure, Category = "Character")
 	bool IsSprinting() const { return bIsSprinting; }
@@ -56,8 +67,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Sleep")
 	bool IsSleeping() const { return bSleeping; }
 
-	/** Carry weight above which you slow down. */
-	float GetOverweightThresholdKg() const { return OverweightKg; }
+	/** Carry weight above which you slow down (Strength adds 2kg per level). */
+	float GetOverweightThresholdKg() const;
 
 	/** Debug: logs the first-person arm animation state and key bone positions. */
 	void LogArmsDebug() const;
@@ -144,11 +155,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDCInventoryComponent> Inventory;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Weapon")
-	TSubclassOf<ADCWeapon> DefaultWeaponClass;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UDCSkillsComponent> Skills;
 
 	UPROPERTY(ReplicatedUsing = OnRep_EquippedWeapon, BlueprintReadOnly, Category = "Weapon")
-	TObjectPtr<ADCWeapon> EquippedWeapon;
+	TObjectPtr<ADCEquippable> EquippedWeapon;
+
+	/** Item equipped when a brand-new survivor spawns. */
+	UPROPERTY(EditDefaultsOnly, Category = "Loadout")
+	TSoftObjectPtr<UDCItemDefinition> StartingEquippedItem;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Loadout")
 	TArray<FDCStartingItem> StartingItems;
@@ -178,23 +193,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Interaction")
 	float InteractRange = 250.f;
 
-	// --- Aim down sights ---
+	// --- Aim down sights (held poses now live on each equippable) ---
 	UPROPERTY(ReplicatedUsing = OnRep_Aiming)
 	bool bIsAiming = false;
-
-	/** Weapon placement relative to the camera at the hip (weapon origin = rear of the slide). */
-	UPROPERTY(EditDefaultsOnly, Category = "Aiming")
-	FVector HipWeaponOffset = FVector(27.f, 9.5f, -11.f);
-
-	UPROPERTY(EditDefaultsOnly, Category = "Aiming")
-	FRotator HipWeaponRotation = FRotator(1.5f, -4.f, 0.f);
-
-	/**
-	 * Weapon placement when aimed. Z puts the P9's sight line (rear blade / front post tops,
-	 * ~3.4cm above the weapon origin) on the camera axis; X sets the eye relief.
-	 */
-	UPROPERTY(EditDefaultsOnly, Category = "Aiming")
-	FVector AimWeaponOffset = FVector(23.f, 0.f, -3.42f);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Aiming")
 	float HipFieldOfView = 85.f;
@@ -295,7 +296,38 @@ protected:
 	UFUNCTION()
 	void HandleStatusChanged();
 
-	void SpawnDefaultWeapon();
+	// --- Shove / stomp (RMB with a melee weapon or empty hands) ---
+	UPROPERTY(EditDefaultsOnly, Category = "Melee")
+	float ShoveStaminaCost = 6.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Melee")
+	float ShoveRange = 140.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Melee")
+	float ShoveKnockdownChance = 0.3f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Melee")
+	float StompDamage = 30.f;
+
+	void Input_Shove();
+
+	UFUNCTION(Server, Reliable)
+	void Server_Shove();
+
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_ShoveFX(bool bStomp);
+
+	/** Local time of the last shove/stomp (drives the shove animation). */
+	float ShoveStartTime = -1000.f;
+
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_WeaponBroke();
+
+	/** Crouch-walking trains Sneaking; sprinting trains Fitness (server). */
+	void UpdateSkillTraining(float DeltaSeconds);
+	float SkillTrainingAccumulator = 0.f;
+
+	void EquipStartingItem();
 	void GiveStartingItems();
 	void AttachWeapon();
 	void UpdateMovementSpeed();

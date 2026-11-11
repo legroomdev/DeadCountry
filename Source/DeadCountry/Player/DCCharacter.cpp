@@ -7,6 +7,8 @@
 #include "Inventory/DCItemDefinition.h"
 #include "Interaction/DCInteractable.h"
 #include "Weapons/DCWeapon.h"
+#include "Weapons/DCEquippable.h"
+#include "Survival/DCSkillsComponent.h"
 #include "World/DCWorldItem.h"
 #include "World/DCLootContainer.h"
 #include "Core/DCAudio.h"
@@ -80,6 +82,7 @@ ADCCharacter::ADCCharacter(const FObjectInitializer& ObjectInitializer)
 	Health = CreateDefaultSubobject<UDCHealthComponent>(TEXT("Health"));
 	Survival = CreateDefaultSubobject<UDCSurvivalComponent>(TEXT("Survival"));
 	Inventory = CreateDefaultSubobject<UDCInventoryComponent>(TEXT("Inventory"));
+	Skills = CreateDefaultSubobject<UDCSkillsComponent>(TEXT("Skills"));
 
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationPitch = false;
@@ -91,7 +94,8 @@ ADCCharacter::ADCCharacter(const FObjectInitializer& ObjectInitializer)
 	Move->JumpZVelocity = 380.f;
 	Move->AirControl = 0.15f;
 
-	DefaultWeaponClass = ADCWeapon::StaticClass();
+	// Starting kit: a cricket bat in hand (melee first - guns are loud), the P9 and a little ammo in the bag.
+	StartingEquippedItem = TSoftObjectPtr<UDCItemDefinition>(FSoftObjectPath(TEXT("/Game/Items/DA_CricketBat.DA_CricketBat")));
 
 	auto AddStarting = [this](const TCHAR* Path, int32 Count)
 	{
@@ -101,7 +105,9 @@ ADCCharacter::ADCCharacter(const FObjectInitializer& ObjectInitializer)
 	};
 	AddStarting(TEXT("/Game/Items/DA_WaterBottle.DA_WaterBottle"), 1);
 	AddStarting(TEXT("/Game/Items/DA_Bandage.DA_Bandage"), 2);
-	AddStarting(TEXT("/Game/Items/DA_Ammo9mm.DA_Ammo9mm"), 34);
+	AddStarting(TEXT("/Game/Items/DA_Ammo9mm.DA_Ammo9mm"), 17);
+	AddStarting(TEXT("/Game/Items/DA_CricketBat.DA_CricketBat"), 1);
+	AddStarting(TEXT("/Game/Items/DA_P9.DA_P9"), 1);
 }
 
 void ADCCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -129,10 +135,15 @@ void ADCCharacter::BeginPlay()
 	if (HasAuthority())
 	{
 		Health->OnDeath.AddDynamic(this, &ADCCharacter::HandleDeath);
-		SpawnDefaultWeapon();
 		GiveStartingItems();
+		EquipStartingItem();
 	}
 	UpdateMovementSpeed();
+}
+
+float ADCCharacter::GetOverweightThresholdKg() const
+{
+	return OverweightKg + 2.f * (Skills ? Skills->GetLevel(EDCSkill::Strength) : 0);
 }
 
 void ADCCharacter::Destroyed()
@@ -153,17 +164,86 @@ bool ADCCharacter::IsDead() const
 // Setup
 // ---------------------------------------------------------------------------
 
-void ADCCharacter::SpawnDefaultWeapon()
+void ADCCharacter::EquipStartingItem()
 {
-	if (!DefaultWeaponClass)
+	if (const UDCItemDefinition* Item = StartingEquippedItem.LoadSynchronous())
+	{
+		if (const FDCInventoryEntry* Entry = Inventory->FindFirstOf(Item))
+		{
+			EquipEntry(Entry->EntryId);
+		}
+	}
+}
+
+void ADCCharacter::EquipEntry(int32 EntryId)
+{
+	if (!HasAuthority() || IsDead())
 	{
 		return;
 	}
+	if (EquippedWeapon && EquippedWeapon->GetEntryId() == EntryId)
+	{
+		Unequip(); // same item again = put it away
+		return;
+	}
+	const FDCInventoryEntry* Entry = Inventory->FindEntry(EntryId);
+	if (!Entry || !Entry->Item || !Entry->Item->EquipClass)
+	{
+		return;
+	}
+	const FDCInventoryEntry EntryCopy = *Entry; // Unequip may modify the array
+	Unequip();
+
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.Instigator = this;
-	EquippedWeapon = GetWorld()->SpawnActor<ADCWeapon>(DefaultWeaponClass, GetActorTransform(), Params);
+	ADCEquippable* NewItem = GetWorld()->SpawnActor<ADCEquippable>(EntryCopy.Item->EquipClass, GetActorTransform(), Params);
+	if (!NewItem)
+	{
+		return;
+	}
+	NewItem->InitFromEntry(EntryCopy);
+	EquippedWeapon = NewItem;
+	bIsAiming = false;
 	AttachWeapon();
+	UpdateMovementSpeed();
+}
+
+void ADCCharacter::Unequip()
+{
+	if (!HasAuthority() || !EquippedWeapon)
+	{
+		return;
+	}
+	float Condition = -1.f;
+	int32 Ammo = -1;
+	EquippedWeapon->StopPrimary();
+	EquippedWeapon->GetInstanceData(Condition, Ammo);
+	Inventory->SetEntryInstanceData(EquippedWeapon->GetEntryId(), Condition, Ammo);
+	EquippedWeapon->Destroy();
+	EquippedWeapon = nullptr;
+	bIsAiming = false;
+	UpdateMovementSpeed();
+}
+
+void ADCCharacter::HandleEquippedBroken()
+{
+	if (!HasAuthority() || !EquippedWeapon)
+	{
+		return;
+	}
+	const FText Name = EquippedWeapon->GetDisplayName();
+	const int32 EntryId = EquippedWeapon->GetEntryId();
+	EquippedWeapon->Destroy();
+	EquippedWeapon = nullptr;
+	Inventory->RemoveFromEntry(EntryId, 1);
+	Multicast_WeaponBroke();
+	SendMessageToOwner(FText::Format(LOCTEXT("Broke", "Your {0} broke!"), Name));
+}
+
+void ADCCharacter::Multicast_WeaponBroke_Implementation()
+{
+	DCAudio::PlayAt(this, EDCSound::WeaponBreak, GetActorLocation() + FVector(0.f, 0.f, 40.f));
 }
 
 void ADCCharacter::GiveStartingItems()
@@ -181,10 +261,9 @@ void ADCCharacter::AttachWeapon()
 {
 	if (EquippedWeapon)
 	{
+		// The equippable supplies its own held pose every frame (UpdateAimVisuals).
 		EquippedWeapon->AttachToComponent(FirstPersonCamera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		// Starts at the hip; UpdateAimVisuals blends toward the ADS pose each frame.
-		EquippedWeapon->SetActorRelativeLocation(HipWeaponOffset);
-		EquippedWeapon->SetActorRelativeRotation(HipWeaponRotation);
+		CurrentArmsAnim = nullptr;
 	}
 }
 
@@ -324,9 +403,17 @@ void ADCCharacter::Server_Interact_Implementation(AActor* Target)
 
 void ADCCharacter::Input_FireStarted()
 {
-	if (EquippedWeapon && !IsDead() && !bSleeping)
+	if (IsDead() || bSleeping)
 	{
-		EquippedWeapon->StartFire();
+		return;
+	}
+	if (EquippedWeapon)
+	{
+		EquippedWeapon->StartPrimary();
+	}
+	else
+	{
+		Input_Shove(); // bare hands: shove
 	}
 }
 
@@ -334,13 +421,101 @@ void ADCCharacter::Input_FireStopped()
 {
 	if (EquippedWeapon)
 	{
-		EquippedWeapon->StopFire();
+		EquippedWeapon->StopPrimary();
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Shove / stomp
+// ---------------------------------------------------------------------------
+
+void ADCCharacter::Input_Shove()
+{
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (IsDead() || bSleeping || Now - ShoveStartTime < 0.6f || (EquippedWeapon && EquippedWeapon->IsBusy()))
+	{
+		return;
+	}
+	ShoveStartTime = Now;
+	Server_Shove();
+}
+
+void ADCCharacter::Server_Shove_Implementation()
+{
+	if (IsDead() || bSleeping || Survival->GetStamina() < 2.f)
+	{
+		return;
+	}
+	Survival->ConsumeStamina(ShoveStaminaCost);
+
+	const FVector Forward = GetControlRotation().Vector().GetSafeNormal2D();
+	const FVector Origin = GetActorLocation();
+	const int32 Strength = Skills->GetLevel(EDCSkill::Strength);
+
+	// A downed zombie right in front gets stomped instead (Zomboid).
+	ADCZombie* StompTarget = nullptr;
+	TArray<ADCZombie*> ShoveTargets;
+	for (TActorIterator<ADCZombie> It(GetWorld()); It; ++It)
+	{
+		ADCZombie* Zombie = *It;
+		if (Zombie->IsDead())
+		{
+			continue;
+		}
+		const FVector To = Zombie->GetActorLocation() - Origin;
+		const float Dist = To.Size2D();
+		if (Dist > ShoveRange + 40.f || FVector::DotProduct(To.GetSafeNormal2D(), Forward) < 0.45f)
+		{
+			continue;
+		}
+		if (Zombie->IsKnockedDown())
+		{
+			if (!StompTarget && Dist < ShoveRange)
+			{
+				StompTarget = Zombie;
+			}
+		}
+		else if (ShoveTargets.Num() < 3)
+		{
+			ShoveTargets.Add(Zombie);
+		}
+	}
+
+	if (StompTarget)
+	{
+		FHitResult Hit;
+		Hit.BoneName = TEXT("head");
+		Hit.ImpactPoint = StompTarget->GetMesh()->GetSocketLocation(TEXT("head"));
+		StompTarget->ApplyMeleeHit(StompDamage * (1.f + 0.05f * Strength), FVector::DownVector, Hit, false, GetController());
+		Skills->AddXP(EDCSkill::Strength, 2.f);
+		Multicast_ShoveFX(true);
+		return;
+	}
+
+	for (ADCZombie* Zombie : ShoveTargets)
+	{
+		const FVector Dir = (Zombie->GetActorLocation() - Origin).GetSafeNormal2D();
+		Zombie->Shove(Dir, ShoveKnockdownChance + 0.03f * Strength, GetController());
+	}
+	if (ShoveTargets.Num() > 0)
+	{
+		Skills->AddXP(EDCSkill::Strength, 1.f);
+	}
+	Multicast_ShoveFX(false);
+}
+
+void ADCCharacter::Multicast_ShoveFX_Implementation(bool bStomp)
+{
+	if (!IsLocallyControlled())
+	{
+		ShoveStartTime = GetWorld()->GetTimeSeconds();
+	}
+	DCAudio::PlayAt(this, bStomp ? EDCSound::MeleeHitBlunt : EDCSound::Shove, GetActorLocation(), bStomp ? 1.f : 0.8f);
 }
 
 void ADCCharacter::Input_Reload()
 {
-	if (EquippedWeapon && !IsDead())
+	if (EquippedWeapon && !IsDead() && !bSleeping)
 	{
 		EquippedWeapon->RequestReload();
 	}
@@ -352,7 +527,15 @@ void ADCCharacter::Input_Reload()
 
 void ADCCharacter::Input_AimStarted()
 {
-	SetAiming(true);
+	// Guns aim down sights; melee weapons and empty hands shove.
+	if (EquippedWeapon && EquippedWeapon->CanAim())
+	{
+		SetAiming(true);
+	}
+	else
+	{
+		Input_Shove();
+	}
 }
 
 void ADCCharacter::Input_AimStopped()
@@ -362,7 +545,7 @@ void ADCCharacter::Input_AimStopped()
 
 void ADCCharacter::SetAiming(bool bNewAiming)
 {
-	if (bNewAiming && (IsDead() || !EquippedWeapon || bSleeping))
+	if (bNewAiming && (IsDead() || !EquippedWeapon || !EquippedWeapon->CanAim() || bSleeping))
 	{
 		return;
 	}
@@ -414,14 +597,14 @@ void ADCCharacter::UpdateFirstPersonArms()
 	FirstPersonArms->SetVisibility(!bSleeping);
 
 	// Pose: aiming idle, swapping to the reload clip (stretched to the weapon's reload time).
-	UAnimSequence* Want = (EquippedWeapon->IsReloading() && ArmsReloadAnim) ? ArmsReloadAnim : ArmsIdleAnim;
+	UAnimSequence* Want = (EquippedWeapon->WantsReloadArmsPose() && ArmsReloadAnim) ? ArmsReloadAnim : ArmsIdleAnim;
 	if (Want && Want != CurrentArmsAnim)
 	{
 		const bool bLoop = Want != ArmsReloadAnim;
 		FirstPersonArms->PlayAnimation(Want, bLoop);
 		if (!bLoop)
 		{
-			FirstPersonArms->SetPlayRate(Want->GetPlayLength() / FMath::Max(0.1f, EquippedWeapon->GetReloadSeconds()));
+			FirstPersonArms->SetPlayRate(Want->GetPlayLength() / FMath::Max(0.1f, EquippedWeapon->GetReloadDuration()));
 		}
 		else
 		{
@@ -433,7 +616,7 @@ void ADCCharacter::UpdateFirstPersonArms()
 	// Place the whole arm mesh so its right hand lands on the grip, oriented with the gun.
 	// Orientation comes from the gun itself (FBX sockets carry an axis-conversion rotation); the socket gives position.
 	const FTransform Grip = EquippedWeapon->GetGripTransform();
-	const FQuat MeshRot = EquippedWeapon->GetActorQuat() * ArmsRotationOffset.Quaternion();
+	const FQuat MeshRot = EquippedWeapon->GetArmsReferenceRotation() * ArmsRotationOffset.Quaternion();
 	const FName Anchor = GetHandAnchorName(FirstPersonArms);
 	const FVector HandInMesh = FirstPersonArms->GetSocketTransform(Anchor, RTS_Component).GetLocation() + ArmsGripOffset;
 	FirstPersonArms->SetWorldLocationAndRotation(Grip.GetLocation() - MeshRot.RotateVector(HandInMesh), MeshRot);
@@ -549,16 +732,19 @@ void ADCCharacter::UpdateAimVisuals(float DeltaSeconds)
 
 	if (EquippedWeapon)
 	{
-		FVector Location = FMath::Lerp(HipWeaponOffset, AimWeaponOffset, T);
-		FRotator Rotation = FMath::Lerp(HipWeaponRotation, FRotator::ZeroRotator, T);
+		// The equippable owns its pose (hip/ADS + recoil, or a melee swing)...
+		FVector Location;
+		FRotator Rotation;
+		EquippedWeapon->GetHeldPose(AimAlpha, Location, Rotation);
 
-		// Gun kick from the weapon, applied on top of the hip/ADS pose.
-		FVector KickLocation;
-		FRotator KickRotation;
-		EquippedWeapon->GetVisualRecoil(T, KickLocation, KickRotation);
-		Location += KickLocation;
-		Rotation += KickRotation;
-
+		// ...and a shove thrusts whatever is in hand forward.
+		const float ShoveT = (GetWorld()->GetTimeSeconds() - ShoveStartTime) / 0.35f;
+		if (ShoveT >= 0.f && ShoveT < 1.f)
+		{
+			const float Push = FMath::Sin(ShoveT * PI);
+			Location += FVector(16.f * Push, -6.f * Push, 4.f * Push);
+			Rotation += FRotator(-25.f * Push, 0.f, 0.f);
+		}
 		EquippedWeapon->GetRootComponent()->SetRelativeLocationAndRotation(Location, Rotation);
 	}
 	if (IsLocallyControlled())
@@ -622,10 +808,42 @@ void ADCCharacter::Tick(float DeltaSeconds)
 			if (FootstepNoiseTimer <= 0.f)
 			{
 				FootstepNoiseTimer = 0.5f;
-				const float Range = bIsSprinting ? 1800.f : 600.f;
+				// Sneaking skill: 6% quieter per level.
+				const float Sneak = 1.f - 0.06f * Skills->GetLevel(EDCSkill::Sneaking);
+				const float Range = (bIsSprinting ? 1800.f : 600.f) * Sneak;
 				MakeNoise(bIsSprinting ? 0.6f : 0.25f, this, GetActorLocation(), Range);
 			}
 		}
+		UpdateSkillTraining(DeltaSeconds);
+	}
+}
+
+void ADCCharacter::UpdateSkillTraining(float DeltaSeconds)
+{
+	SkillTrainingAccumulator += DeltaSeconds;
+	if (SkillTrainingAccumulator < 1.f)
+	{
+		return;
+	}
+	const float Seconds = SkillTrainingAccumulator;
+	SkillTrainingAccumulator = 0.f;
+
+	const float Speed = GetVelocity().Size2D();
+	if (Speed < 50.f || !GetCharacterMovement()->IsMovingOnGround())
+	{
+		return;
+	}
+	if (bIsSprinting)
+	{
+		Skills->AddXP(EDCSkill::Fitness, 0.6f * Seconds);
+	}
+	if (bIsCrouched)
+	{
+		Skills->AddXP(EDCSkill::Sneaking, (IsZombieNearby(2000.f) ? 0.6f : 0.15f) * Seconds);
+	}
+	if (Inventory->GetTotalWeight() > OverweightKg * 0.75f)
+	{
+		Skills->AddXP(EDCSkill::Strength, 0.1f * Seconds);
 	}
 }
 
@@ -680,7 +898,7 @@ void ADCCharacter::UpdateMovementSpeed()
 	{
 		Speed *= InjuredLegSpeedMultiplier;
 	}
-	if (Inventory && Inventory->GetTotalWeight() > OverweightKg)
+	if (Inventory && Inventory->GetTotalWeight() > GetOverweightThresholdKg())
 	{
 		Speed *= OverweightSpeedMultiplier;
 	}
@@ -725,11 +943,8 @@ float ADCCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEve
 
 void ADCCharacter::HandleDeath(AController* Killer)
 {
-	// Server only. Drop a lootable body with everything we carried.
-	if (EquippedWeapon)
-	{
-		EquippedWeapon->StopFire();
-	}
+	// Server only. Drop a lootable body with everything we carried (the weapon in hand keeps its ammo/condition).
+	Unequip();
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -831,7 +1046,7 @@ void ADCCharacter::StartSleeping()
 	bIsAiming = false;
 	if (EquippedWeapon)
 	{
-		EquippedWeapon->StopFire();
+		EquippedWeapon->StopPrimary();
 	}
 	ApplySleepMovementState();
 	UpdateMovementSpeed();
@@ -902,7 +1117,25 @@ void ADCCharacter::WriteSaveData(FDCSavedCharacter& Out) const
 	Out.Energy = Survival->GetEnergy();
 	Out.Fatigue = Survival->GetFatigue();
 	Inventory->ExportSave(Out.Inventory);
-	Out.WeaponAmmo = EquippedWeapon ? EquippedWeapon->GetAmmoInMagazine() : -1;
+
+	// The item in hand holds the live ammo/condition; patch it into its saved entry.
+	Out.bHasEquipped = false;
+	if (EquippedWeapon)
+	{
+		if (const FDCInventoryEntry* Held = Inventory->FindEntry(EquippedWeapon->GetEntryId()))
+		{
+			Out.bHasEquipped = true;
+			Out.EquippedPosition = Held->Position;
+			for (FDCSavedInventoryEntry& Saved : Out.Inventory)
+			{
+				if (Saved.Position == Held->Position)
+				{
+					EquippedWeapon->GetInstanceData(Saved.Condition, Saved.LoadedAmmo);
+				}
+			}
+		}
+	}
+	Out.SkillXP = Skills->GetAllXP();
 }
 
 void ADCCharacter::ReadSaveData(const FDCSavedCharacter& In)
@@ -914,11 +1147,24 @@ void ADCCharacter::ReadSaveData(const FDCSavedCharacter& In)
 	TeleportTo(In.Transform.GetLocation(), In.Transform.Rotator(), false, true);
 	Health->RestoreState(In.BodyParts, In.Infection, In.bInfected);
 	Survival->RestoreState(In.Hydration, In.Energy, In.Fatigue);
-	Inventory->ImportSave(In.Inventory); // replaces the fresh starting kit
-	if (EquippedWeapon && In.WeaponAmmo >= 0)
+	// Drop the fresh starting kit (and what's in hand) and restore exactly what was saved.
+	if (EquippedWeapon)
 	{
-		EquippedWeapon->SetAmmoInMagazine(In.WeaponAmmo);
+		EquippedWeapon->Destroy();
+		EquippedWeapon = nullptr;
 	}
+	Inventory->ImportSave(In.Inventory);
+	Skills->RestoreXP(In.SkillXP);
+	if (In.bHasEquipped)
+	{
+		if (const FDCInventoryEntry* Held = Inventory->FindEntryAt(In.EquippedPosition))
+		{
+			EquipEntry(Held->EntryId);
+		}
+	}
+	UE_LOG(LogDC, Log, TEXT("Restored survivor: %d items, in hand: %s (%s)"), Inventory->GetEntries().Num(),
+		EquippedWeapon ? *EquippedWeapon->GetDisplayName().ToString() : TEXT("nothing"),
+		EquippedWeapon ? *EquippedWeapon->GetHudPrimary() : TEXT("-"));
 	UpdateMovementSpeed();
 }
 
@@ -929,7 +1175,16 @@ void ADCCharacter::ReadSaveData(const FDCSavedCharacter& In)
 void ADCCharacter::Server_UseItem_Implementation(int32 EntryId)
 {
 	const FDCInventoryEntry* Entry = Inventory->FindEntry(EntryId);
-	if (IsDead() || !Entry || !Entry->Item || !Entry->Item->bConsumable)
+	if (IsDead() || !Entry || !Entry->Item)
+	{
+		return;
+	}
+	if (Entry->Item->EquipClass)
+	{
+		EquipEntry(EntryId); // weapons: take it in hand (or put it away)
+		return;
+	}
+	if (!Entry->Item->bConsumable)
 	{
 		return;
 	}
@@ -946,18 +1201,20 @@ void ADCCharacter::Server_UseItem_Implementation(int32 EntryId)
 
 void ADCCharacter::Server_DropItem_Implementation(int32 EntryId)
 {
-	const FDCInventoryEntry* Entry = Inventory->FindEntry(EntryId);
-	if (IsDead() || !Entry || !Entry->Item)
+	if (IsDead() || !Inventory->FindEntry(EntryId))
 	{
 		return;
 	}
-
-	UDCItemDefinition* Item = Entry->Item;
-	const int32 Count = Entry->Count;
-	const FVector DropLocation = GetActorLocation() + GetActorForwardVector() * 80.f;
-	if (Inventory->RemoveFromEntry(EntryId, Count))
+	if (EquippedWeapon && EquippedWeapon->GetEntryId() == EntryId)
 	{
-		ADCWorldItem::SpawnDropped(GetWorld(), Item, Count, DropLocation, FRotator(0.f, GetActorRotation().Yaw, 0.f));
+		Unequip(); // writes its ammo/condition back first
+	}
+	const FDCInventoryEntry Entry = *Inventory->FindEntry(EntryId);
+	const FVector DropLocation = GetActorLocation() + GetActorForwardVector() * 80.f;
+	if (Inventory->RemoveFromEntry(EntryId, Entry.Count))
+	{
+		ADCWorldItem::SpawnDropped(GetWorld(), Entry.Item, Entry.Count, DropLocation, FRotator(0.f, GetActorRotation().Yaw, 0.f),
+			Entry.Condition, Entry.LoadedAmmo);
 	}
 }
 

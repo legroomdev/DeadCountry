@@ -84,7 +84,14 @@ silhouette, ammo panel, stamina bar, clock, prompts, sleep/death/inventory overl
 
 ---
 
-## Milestone 3 — Survival depth (≈ 6–8 weeks)
+## Milestone 3 — Survival depth (≈ 6–8 weeks) — *in progress*
+
+**Round 1 done (2026-11-11):** melee combat (cricket bat, machete: data-driven swings, multi-target arcs, crits,
+knockdowns, durability that breaks weapons), shove + stomp, zombie stagger/knockdown ragdoll with get-up, equipping
+from the inventory (items carry their own condition and loaded ammo through drops, bodies and saves), skills & XP
+(Aiming, Reloading, Long Blunt/Blade, Fitness, Strength, Sneaking, Maintenance, ... with real effects),
+sandbox world options (zombie speed, population, infection, loot, day length, XP).
+**Round 2 next:** drag-and-drop inventory screen + equipment slots. **Round 3:** injuries, nutrition/cooking, mood.
 
 1. **Melee combat** — bats, crowbars, machetes, axes, shovels; swing stamina, weapon durability, shove/knock-down, stomp; melee becomes the default and guns the emergency.
 2. **Inventory UI** — UMG grid with drag/drop and rotate, equipment slots (hands, back, belt, clothing), containers in containers, a nearby-floor panel, a loot panel, weight and encumbrance.

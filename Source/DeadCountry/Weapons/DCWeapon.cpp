@@ -4,6 +4,7 @@
 #include "Inventory/DCItemDefinition.h"
 #include "Player/DCCharacter.h"
 #include "Core/DCAudio.h"
+#include "Survival/DCSkillsComponent.h"
 #include "Weapons/DCShellCasing.h"
 #include "Components/DecalComponent.h"
 #include "Components/PointLightComponent.h"
@@ -134,6 +135,7 @@ void ADCWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ADCWeapon, AmmoInMagazine);
 	DOREPLIFETIME(ADCWeapon, bReloading);
+	DOREPLIFETIME(ADCWeapon, CurrentReloadSeconds);
 }
 
 void ADCWeapon::BeginPlay()
@@ -210,7 +212,8 @@ void ADCWeapon::LocalFireShot()
 	Server_Fire(ViewLocation, ViewRotation.Vector());
 
 	// View recoil is applied locally, after the shot direction was taken, so it affects the next shot.
-	const float Scale = Character->IsAiming() ? AimRecoilMultiplier : 1.f;
+	const int32 AimSkill = Character->GetSkillsComponent()->GetLevel(EDCSkill::Aiming);
+	const float Scale = (Character->IsAiming() ? AimRecoilMultiplier : 1.f) * (1.f - 0.03f * AimSkill);
 	const float Yaw = FMath::FRandRange(-RecoilYaw, RecoilYaw * 1.4f) * Scale;
 	Character->ApplyRecoil(RecoilPitch * Scale * FMath::FRandRange(0.85f, 1.15f), Yaw, RecoilRecoverFraction);
 }
@@ -268,7 +271,9 @@ void ADCWeapon::Server_Fire_Implementation(FVector_NetQuantize ClientViewLocatio
 
 	--AmmoInMagazine;
 
-	const float Spread = SpreadDegrees * (Character->IsAiming() ? AimSpreadMultiplier : 1.f);
+	// Aiming skill tightens the cone 5% per level.
+	const int32 AimSkill = Character->GetSkillsComponent()->GetLevel(EDCSkill::Aiming);
+	const float Spread = SpreadDegrees * (Character->IsAiming() ? AimSpreadMultiplier : 1.f) * (1.f - 0.05f * AimSkill);
 	const FVector Direction = FMath::VRandCone(ClientViewDirection, FMath::DegreesToRadians(Spread));
 	const FVector End = Start + Direction * RangeCm;
 
@@ -281,7 +286,12 @@ void ADCWeapon::Server_Fire_Implementation(FVector_NetQuantize ClientViewLocatio
 	if (bHit && Hit.GetActor())
 	{
 		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, Direction, Hit, Character->GetController(), this, nullptr);
+		if (Cast<APawn>(Hit.GetActor()))
+		{
+			Character->GetSkillsComponent()->AddXP(EDCSkill::Aiming, 3.f);
+		}
 	}
+	Character->GetSkillsComponent()->AddXP(EDCSkill::Aiming, 0.5f);
 
 	// Zombies hear this. Loudness 1 at the muzzle.
 	MakeNoise(1.f, Character, Start, NoiseRangeCm);
@@ -395,9 +405,13 @@ void ADCWeapon::Server_Reload_Implementation()
 	{
 		return;
 	}
+	// Reloading skill: 4% faster per level.
+	const ADCCharacter* Character = Cast<ADCCharacter>(GetOwner());
+	const int32 Skill = Character ? Character->GetSkillsComponent()->GetLevel(EDCSkill::Reloading) : 0;
+	CurrentReloadSeconds = ReloadSeconds * (1.f - 0.04f * Skill);
 	bReloading = true;
 	OnRep_Reloading();
-	GetWorldTimerManager().SetTimer(ReloadTimer, this, &ADCWeapon::FinishReload, ReloadSeconds, false);
+	GetWorldTimerManager().SetTimer(ReloadTimer, this, &ADCWeapon::FinishReload, CurrentReloadSeconds, false);
 }
 
 void ADCWeapon::OnRep_Reloading()
@@ -423,7 +437,47 @@ void ADCWeapon::FinishReload()
 	if (Character)
 	{
 		AmmoInMagazine += Character->GetInventoryComponent()->RemoveItem(ResolvedAmmoItem, Needed);
+		Character->GetSkillsComponent()->AddXP(EDCSkill::Reloading, 4.f);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Equippable
+// ---------------------------------------------------------------------------
+
+void ADCWeapon::GetHeldPose(float AimAlpha, FVector& OutLocation, FRotator& OutRotation) const
+{
+	Super::GetHeldPose(AimAlpha, OutLocation, OutRotation);
+	FVector KickLocation;
+	FRotator KickRotation;
+	GetVisualRecoil(AimAlpha, KickLocation, KickRotation);
+	OutLocation += KickLocation;
+	OutRotation += KickRotation;
+}
+
+FString ADCWeapon::GetHudPrimary() const
+{
+	return bReloading ? FString(TEXT("Reloading")) : FString::Printf(TEXT("%d / %d"), AmmoInMagazine, MagazineSize);
+}
+
+FString ADCWeapon::GetHudSecondary() const
+{
+	return FString::Printf(TEXT("%d in reserve  [R] reload"), GetReserveAmmo());
+}
+
+void ADCWeapon::InitFromEntry(const FDCInventoryEntry& Entry)
+{
+	Super::InitFromEntry(Entry);
+	if (HasAuthority() && Entry.LoadedAmmo >= 0)
+	{
+		AmmoInMagazine = FMath::Clamp(Entry.LoadedAmmo, 0, MagazineSize);
+	}
+}
+
+void ADCWeapon::GetInstanceData(float& OutCondition, int32& OutLoadedAmmo) const
+{
+	OutCondition = -1.f;
+	OutLoadedAmmo = AmmoInMagazine;
 }
 
 // ---------------------------------------------------------------------------
@@ -480,7 +534,7 @@ void ADCWeapon::UpdateActionVisuals()
 	bool bMagVisible = true;
 	if (bReloading)
 	{
-		const float R = (Now - ReloadStartTime) / FMath::Max(0.01f, ReloadSeconds);
+		const float R = (Now - ReloadStartTime) / FMath::Max(0.01f, CurrentReloadSeconds);
 		if (R < 0.3f)
 		{
 			MagDrop = FMath::InterpEaseIn(0.f, MagDropCm, R / 0.3f, 2.f);
@@ -533,7 +587,7 @@ void ADCWeapon::UpdateActionVisuals()
 			bPlayedMagOut = bPlayedMagIn = false;
 			bSlideLockedAtReloadStart = AmmoInMagazine <= 0;
 		}
-		const float R = (Now - ReloadStartTime) / FMath::Max(0.01f, ReloadSeconds);
+		const float R = (Now - ReloadStartTime) / FMath::Max(0.01f, CurrentReloadSeconds);
 		if (!bPlayedMagOut && R > 0.02f)
 		{
 			bPlayedMagOut = true;

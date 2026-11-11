@@ -134,6 +134,16 @@ void ADCZombieAIController::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	if (Zombie->IsIncapacitated())
+	{
+		// Knocked down or staggering: no moving, no biting. Repath as soon as it recovers.
+		if (Zombie->IsKnockedDown())
+		{
+			StopMovement();
+		}
+		NextRepathTime = 0.f;
+		return;
+	}
 
 	const float Now = GetWorld()->GetTimeSeconds();
 

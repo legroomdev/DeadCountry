@@ -20,6 +20,8 @@ void UDCInventoryComponent::ExportSave(TArray<FDCSavedInventoryEntry>& Out) cons
 			Saved.Count = Entry.Count;
 			Saved.Position = Entry.Position;
 			Saved.bRotated = Entry.bRotated;
+			Saved.Condition = Entry.Condition;
+			Saved.LoadedAmmo = Entry.LoadedAmmo;
 		}
 	}
 }
@@ -48,13 +50,70 @@ void UDCInventoryComponent::ImportSave(const TArray<FDCSavedInventoryEntry>& In)
 			Entry.Count = Saved.Count;
 			Entry.Position = Saved.Position;
 			Entry.bRotated = Saved.bRotated;
+			Entry.Condition = Saved.Condition;
+			Entry.LoadedAmmo = Saved.LoadedAmmo;
 		}
 		else
 		{
-			AddItem(Item, Saved.Count); // grid or item size changed - find it a new spot
+			// Grid or item size changed - find it a new spot, keeping its state.
+			FDCInventoryEntry Loose;
+			Loose.Item = Item;
+			Loose.Count = Saved.Count;
+			Loose.Condition = Saved.Condition;
+			Loose.LoadedAmmo = Saved.LoadedAmmo;
+			AddEntry(Loose);
 		}
 	}
 	NotifyChanged();
+}
+
+int32 UDCInventoryComponent::AddEntry(const FDCInventoryEntry& Source)
+{
+	if (!Source.Item || Source.Count <= 0 || !HasAuthority())
+	{
+		return Source.Count;
+	}
+	if (!Source.HasInstanceData())
+	{
+		return AddItem(Source.Item, Source.Count);
+	}
+	FIntPoint Position;
+	bool bRotated = false;
+	if (!FindFreeSlot(Source.Item->GridSize, Position, bRotated))
+	{
+		return Source.Count;
+	}
+	FDCInventoryEntry& NewEntry = Entries.AddDefaulted_GetRef();
+	NewEntry = Source;
+	NewEntry.EntryId = NextEntryId++;
+	NewEntry.Position = Position;
+	NewEntry.bRotated = bRotated;
+	NotifyChanged();
+	return 0;
+}
+
+void UDCInventoryComponent::SetEntryInstanceData(int32 EntryId, float Condition, int32 LoadedAmmo)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (FDCInventoryEntry* Entry = Entries.FindByPredicate([EntryId](const FDCInventoryEntry& E) { return E.EntryId == EntryId; }))
+	{
+		Entry->Condition = Condition;
+		Entry->LoadedAmmo = LoadedAmmo;
+		NotifyChanged();
+	}
+}
+
+const FDCInventoryEntry* UDCInventoryComponent::FindEntryAt(FIntPoint Position) const
+{
+	return Entries.FindByPredicate([Position](const FDCInventoryEntry& E) { return E.Position == Position; });
+}
+
+const FDCInventoryEntry* UDCInventoryComponent::FindFirstOf(const UDCItemDefinition* Item) const
+{
+	return Entries.FindByPredicate([Item](const FDCInventoryEntry& E) { return E.Item == Item; });
 }
 
 UDCInventoryComponent::UDCInventoryComponent()
@@ -116,6 +175,7 @@ int32 UDCInventoryComponent::AddItem(UDCItemDefinition* Item, int32 Count)
 		NewEntry.Count = FMath::Min(Remaining, MaxStack);
 		NewEntry.Position = Position;
 		NewEntry.bRotated = bRotated;
+		NewEntry.Condition = Item->MaxCondition > 0.f ? Item->MaxCondition : -1.f;
 		Remaining -= NewEntry.Count;
 	}
 
@@ -188,7 +248,7 @@ bool UDCInventoryComponent::TransferAllTo(UDCInventoryComponent* Target)
 	for (int32 i = Entries.Num() - 1; i >= 0; --i)
 	{
 		FDCInventoryEntry& Entry = Entries[i];
-		const int32 Leftover = Target->AddItem(Entry.Item, Entry.Count);
+		const int32 Leftover = Target->AddEntry(Entry); // keeps condition / loaded ammo
 		if (Leftover != Entry.Count)
 		{
 			bChanged = true;

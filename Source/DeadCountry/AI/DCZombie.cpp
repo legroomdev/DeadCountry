@@ -68,12 +68,26 @@ void ADCZombie::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 	DOREPLIFETIME(ADCZombie, bAlerted);
 	DOREPLIFETIME(ADCZombie, LastHitDirection);
 	DOREPLIFETIME(ADCZombie, LastHitBone);
+	DOREPLIFETIME(ADCZombie, bKnockedDown);
 }
 
 void ADCZombie::BeginPlay()
 {
 	Super::BeginPlay();
 	Health = MaxHealth;
+
+	// World sandbox rules: how fast the dead move and how often a bite infects.
+	if (const ADCSurvivalGameMode* GM = GetWorld()->GetAuthGameMode<ADCSurvivalGameMode>())
+	{
+		const FDCSandboxSettings& Sandbox = GM->GetSandbox();
+		switch (Sandbox.ZombieSpeed)
+		{
+		case EDCZombieSpeed::FastShamblers: WalkSpeed = 165.f; ChaseSpeed = 380.f; break;
+		case EDCZombieSpeed::Sprinters:     WalkSpeed = 190.f; ChaseSpeed = 560.f; break;
+		default: break;
+		}
+		InfectionChance *= Sandbox.InfectionChanceScale;
+	}
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 
 	// Deterministic variety (same on every machine): roughly a third are Quinn.
@@ -144,7 +158,7 @@ float ADCZombie::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
 bool ADCZombie::TryAttack(AActor* Target)
 {
 	ADCCharacter* Victim = Cast<ADCCharacter>(Target);
-	if (!HasAuthority() || bDead || !Victim || Victim->IsDead())
+	if (!HasAuthority() || bDead || !Victim || Victim->IsDead() || IsIncapacitated())
 	{
 		return false;
 	}
@@ -169,6 +183,128 @@ bool ADCZombie::TryAttack(AActor* Target)
 
 	Victim->GetHealthComponent()->ApplyDamageToPart(Part, AttackDamage, GetController(), BleedChance, 0.f, bInfect);
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Melee reactions
+// ---------------------------------------------------------------------------
+
+bool ADCZombie::IsIncapacitated() const
+{
+	return bKnockedDown || GetWorld()->GetTimeSeconds() < StaggerUntil;
+}
+
+void ADCZombie::ApplyMeleeHit(float Damage, const FVector& Direction, const FHitResult& Hit, bool bKnockdown, AController* Attacker)
+{
+	if (!HasAuthority() || bDead)
+	{
+		return;
+	}
+	FPointDamageEvent Event(Damage, Hit, Direction, nullptr);
+	TakeDamage(Damage, Event, Attacker, Attacker ? Attacker->GetPawn() : nullptr);
+	if (bDead)
+	{
+		return;
+	}
+	if (bKnockdown && !bKnockedDown)
+	{
+		Knockdown(Direction);
+	}
+	else if (!bKnockedDown)
+	{
+		StaggerUntil = GetWorld()->GetTimeSeconds() + 0.5f; // every solid hit interrupts
+		LaunchCharacter(Direction * 160.f, true, false);
+	}
+}
+
+void ADCZombie::Shove(const FVector& Direction, float InKnockdownChance, AController* Attacker)
+{
+	if (!HasAuthority() || bDead || bKnockedDown)
+	{
+		return;
+	}
+	if (ADCZombieAIController* AI = GetController<ADCZombieAIController>())
+	{
+		if (Attacker && Attacker->GetPawn())
+		{
+			AI->SetTarget(Attacker->GetPawn());
+		}
+	}
+	if (FMath::FRand() < InKnockdownChance)
+	{
+		Knockdown(Direction);
+		return;
+	}
+	StaggerUntil = GetWorld()->GetTimeSeconds() + 1.1f;
+	LaunchCharacter(Direction * 480.f + FVector(0.f, 0.f, 60.f), true, true);
+}
+
+void ADCZombie::Knockdown(const FVector& Direction)
+{
+	if (!HasAuthority() || bDead || bKnockedDown)
+	{
+		return;
+	}
+	LastHitDirection = Direction;
+	LastHitBone = FName(TEXT("spine_03"));
+	bKnockedDown = true;
+	OnRep_KnockedDown();
+	if (AController* AI = GetController())
+	{
+		AI->StopMovement();
+	}
+	GetWorldTimerManager().SetTimer(GetUpTimer, this, &ADCZombie::GetUp,
+		FMath::FRandRange(KnockdownSeconds.X, KnockdownSeconds.Y), false);
+}
+
+void ADCZombie::GetUp()
+{
+	if (!bKnockedDown || bDead)
+	{
+		return;
+	}
+	// Stand the capsule up where the body ended up.
+	const FVector Pelvis = GetMesh()->GetSocketLocation(TEXT("pelvis"));
+	SetActorLocation(FVector(Pelvis.X, Pelvis.Y, Pelvis.Z + GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * 0.5f), false, nullptr, ETeleportType::TeleportPhysics);
+	bKnockedDown = false;
+	OnRep_KnockedDown();
+	StaggerUntil = GetWorld()->GetTimeSeconds() + 0.6f;
+}
+
+void ADCZombie::OnRep_KnockedDown()
+{
+	if (bDead)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Body = GetMesh();
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (bKnockedDown)
+	{
+		// Fall over (cosmetic ragdoll on every machine); the capsule stops blocking.
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		GetCharacterMovement()->StopMovementImmediately();
+		GetCharacterMovement()->DisableMovement();
+		Body->SetCollisionProfileName(TEXT("Ragdoll"));
+		Body->SetCollisionResponseToChannel(DC_TRACE_WEAPON, ECR_Block);
+		Body->SetAllBodiesSimulatePhysics(true);
+		Body->SetSimulatePhysics(true);
+		Body->WakeAllRigidBodies();
+		Body->AddImpulse((FVector(LastHitDirection) + FVector(0.f, 0.f, 0.2f)).GetSafeNormal() * 280.f, TEXT("spine_03"), true);
+	}
+	else
+	{
+		// Get back up: kill the ragdoll and snap the mesh back onto the capsule.
+		Body->SetSimulatePhysics(false);
+		Body->SetAllBodiesSimulatePhysics(false);
+		Body->AttachToComponent(Capsule, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		Body->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -89.f), FRotator(0.f, -90.f, 0.f));
+		Body->SetCollisionProfileName(TEXT("CharacterMesh"));
+		Body->SetCollisionResponseToChannel(DC_TRACE_WEAPON, ECR_Block);
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+		CurrentLoopAnim = nullptr; // restart locomotion
+	}
 }
 
 void ADCZombie::SetAlerted(bool bNewAlerted)
@@ -222,7 +358,7 @@ void ADCZombie::OnRep_Dead()
 void ADCZombie::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// Living zombies should only leave the world when the level unloads or a save is applied.
-	if (EndPlayReason == EEndPlayReason::Destroyed && !bDead && HasAuthority())
+	if (EndPlayReason == EEndPlayReason::Destroyed && !bDead && !bRemovedQuietly && HasAuthority())
 	{
 		UE_LOG(LogDC, Warning, TEXT("Living zombie %s removed at %s (z=%.0f)."), *GetName(), *GetActorLocation().ToCompactString(), GetActorLocation().Z);
 	}
@@ -247,6 +383,10 @@ void ADCZombie::Tick(float DeltaSeconds)
 void ADCZombie::UpdateAnimation()
 {
 	USkeletalMeshComponent* Body = GetMesh();
+	if (bKnockedDown)
+	{
+		return; // ragdolling
+	}
 	if (GetWorld()->GetTimeSeconds() < AttackAnimEndTime)
 	{
 		return; // let the grab play out

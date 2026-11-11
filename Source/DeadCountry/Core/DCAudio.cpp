@@ -27,6 +27,11 @@ namespace
 		{ TEXT("SW_Zombie_Groan"), 4,  2500.f, 0.10f }, // ZombieGroan
 		{ TEXT("SW_Zombie_Alert"), 2,  4000.f, 0.08f }, // ZombieAlert
 		{ TEXT("SW_Zombie_Attack"),2,  2000.f, 0.08f }, // ZombieAttack
+		{ TEXT("SW_Melee_Swing"),  3,   900.f, 0.08f }, // MeleeSwing
+		{ TEXT("SW_Melee_HitBlunt"),3, 1800.f, 0.08f }, // MeleeHitBlunt
+		{ TEXT("SW_Melee_HitBlade"),2, 1600.f, 0.08f }, // MeleeHitBlade
+		{ TEXT("SW_Shove"),        0,  1200.f, 0.10f }, // Shove
+		{ TEXT("SW_WeaponBreak"),  0,  2000.f, 0.05f }, // WeaponBreak
 	};
 	static_assert(UE_ARRAY_COUNT(GSpecs) == static_cast<int32>(EDCSound::MAX), "One spec per EDCSound");
 

@@ -78,6 +78,9 @@ private:
 	UPROPERTY() TObjectPtr<UBorder> InventoryPanel;
 	UPROPERTY() TObjectPtr<UTextBlock> InventoryHeader;
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> InventoryRows;
+	UPROPERTY() TObjectPtr<UTextBlock> SkillsText;
+	UPROPERTY() TObjectPtr<UBorder> ConditionBack;
+	UPROPERTY() TObjectPtr<UBorder> ConditionFill;
 
 	UPROPERTY() TObjectPtr<UBorder> SleepOverlay;
 	UPROPERTY() TObjectPtr<UTextBlock> SleepText;

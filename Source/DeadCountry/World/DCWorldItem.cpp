@@ -66,7 +66,8 @@ void ADCWorldItem::SetItem(UDCItemDefinition* NewItem, int32 NewCount)
 	RefreshMesh();
 }
 
-ADCWorldItem* ADCWorldItem::SpawnDropped(UWorld* World, UDCItemDefinition* InItem, int32 InCount, const FVector& Location, const FRotator& Rotation)
+ADCWorldItem* ADCWorldItem::SpawnDropped(UWorld* World, UDCItemDefinition* InItem, int32 InCount, const FVector& Location, const FRotator& Rotation,
+	float InCondition, int32 InLoadedAmmo)
 {
 	if (!World || !InItem || InCount <= 0)
 	{
@@ -79,6 +80,8 @@ ADCWorldItem* ADCWorldItem::SpawnDropped(UWorld* World, UDCItemDefinition* InIte
 	if (Spawned)
 	{
 		Spawned->SetItem(InItem, InCount);
+		Spawned->Condition = InCondition;
+		Spawned->LoadedAmmo = InLoadedAmmo;
 	}
 	return Spawned;
 }
@@ -109,7 +112,12 @@ void ADCWorldItem::Interact_Implementation(APawn* InstigatorPawn)
 		return;
 	}
 
-	const int32 Leftover = Character->GetInventoryComponent()->AddItem(Item, Count);
+	FDCInventoryEntry Picked;
+	Picked.Item = Item;
+	Picked.Count = Count;
+	Picked.Condition = Condition;
+	Picked.LoadedAmmo = LoadedAmmo;
+	const int32 Leftover = Character->GetInventoryComponent()->AddEntry(Picked);
 	if (Leftover <= 0)
 	{
 		Destroy();

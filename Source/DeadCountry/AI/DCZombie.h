@@ -33,6 +33,21 @@ public:
 	/** Server: try to hit Target if in range and off cooldown. */
 	bool TryAttack(AActor* Target);
 
+	/** Server: a melee blow. May knock the zombie down. */
+	void ApplyMeleeHit(float Damage, const FVector& Direction, const FHitResult& Hit, bool bKnockdown, AController* Attacker);
+
+	/** Server: shoved - staggers back, or falls over if unlucky. */
+	void Shove(const FVector& Direction, float KnockdownChance, AController* Attacker);
+
+	/** Server: knocked flat; gets back up after a few seconds. */
+	void Knockdown(const FVector& Direction);
+
+	UFUNCTION(BlueprintPure, Category = "Zombie")
+	bool IsKnockedDown() const { return bKnockedDown; }
+
+	/** Down or staggering: can't attack, AI waits. */
+	bool IsIncapacitated() const;
+
 	float GetAttackRange() const { return AttackRange; }
 
 	/** Server: the AI calls this when it starts/stops chasing (drives the alert scream). */
@@ -40,6 +55,10 @@ public:
 
 	/** World save support. */
 	float GetHealth() const { return Health; }
+
+	/** Removed on purpose (save load / population option) - suppresses the unexpected-removal warning. */
+	void RemoveQuietly() { bRemovedQuietly = true; if (AController* AI = GetController()) { AI->Destroy(); } Destroy(); }
+	bool bRemovedQuietly = false;
 	void SetHealth(float NewHealth) { Health = FMath::Clamp(NewHealth, 1.f, MaxHealth); }
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Zombie")
@@ -126,6 +145,21 @@ protected:
 
 	UFUNCTION()
 	void OnRep_Alerted();
+
+	UPROPERTY(ReplicatedUsing = OnRep_KnockedDown)
+	bool bKnockedDown = false;
+
+	UFUNCTION()
+	void OnRep_KnockedDown();
+
+	void GetUp();
+
+	/** Seconds a knocked-down zombie stays down. */
+	UPROPERTY(EditAnywhere, Category = "Zombie")
+	FVector2D KnockdownSeconds = FVector2D(2.5f, 4.5f);
+
+	float StaggerUntil = -1.f;
+	FTimerHandle GetUpTimer;
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void Multicast_PlayAttack();

@@ -27,7 +27,18 @@ struct DEADCOUNTRY_API FDCInventoryEntry
 	UPROPERTY(BlueprintReadOnly, Category = "Inventory")
 	bool bRotated = false;
 
+	/** Per-instance durability (-1 = item doesn't wear). */
+	UPROPERTY(BlueprintReadOnly, Category = "Inventory")
+	float Condition = -1.f;
+
+	/** Per-instance loaded rounds for firearms (-1 = not a firearm / unknown). */
+	UPROPERTY(BlueprintReadOnly, Category = "Inventory")
+	int32 LoadedAmmo = -1;
+
 	FIntPoint GetSize() const;
+
+	/** Items with their own state never stack. */
+	bool HasInstanceData() const { return Condition >= 0.f || LoadedAmmo >= 0; }
 };
 
 /** Inventory entry as stored in a world save (item by asset path, so saves survive restarts). */
@@ -40,6 +51,8 @@ struct DEADCOUNTRY_API FDCSavedInventoryEntry
 	UPROPERTY() int32 Count = 0;
 	UPROPERTY() FIntPoint Position = FIntPoint::ZeroValue;
 	UPROPERTY() bool bRotated = false;
+	UPROPERTY() float Condition = -1.f;
+	UPROPERTY() int32 LoadedAmmo = -1;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDCOnInventoryChanged);
@@ -75,6 +88,12 @@ public:
 	/** Adds as many as will fit. Returns the number that did NOT fit. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Inventory")
 	int32 AddItem(UDCItemDefinition* Item, int32 Count = 1);
+
+	/** Adds a copy of an entry, keeping its instance data (condition, loaded ammo). Returns how many did NOT fit. */
+	int32 AddEntry(const FDCInventoryEntry& Source);
+
+	/** Server: update an entry's per-instance state. */
+	void SetEntryInstanceData(int32 EntryId, float Condition, int32 LoadedAmmo);
 
 	/** Removes Count from one entry; deletes the entry if it hits zero. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Inventory")
@@ -116,6 +135,8 @@ public:
 	const TArray<FDCInventoryEntry>& GetEntries() const { return Entries; }
 
 	const FDCInventoryEntry* FindEntry(int32 EntryId) const;
+	const FDCInventoryEntry* FindEntryAt(FIntPoint Position) const;
+	const FDCInventoryEntry* FindFirstOf(const UDCItemDefinition* Item) const;
 
 protected:
 	UPROPERTY(ReplicatedUsing = OnRep_Entries)

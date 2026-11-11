@@ -29,6 +29,9 @@ public:
 	/** World save support (server only). */
 	void RestoreState(float InHydration, float InEnergy, float InFatigue);
 
+	/** Server: spend stamina on a swing/shove. */
+	void ConsumeStamina(float Amount) { Stamina = FMath::Max(0.f, Stamina - Amount); }
+
 	UFUNCTION(BlueprintPure, Category = "Survival")
 	float GetHydration() const { return Hydration; }
 

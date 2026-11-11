@@ -1,6 +1,8 @@
 #include "World/DCLootContainer.h"
 #include "Inventory/DCInventoryComponent.h"
 #include "Player/DCCharacter.h"
+#include "Survival/DCSurvivalGameMode.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Net/UnrealNetwork.h"
@@ -48,9 +50,12 @@ void ADCLootContainer::BeginPlay()
 
 void ADCLootContainer::RollLoot()
 {
+	// Sandbox loot rarity scales every roll.
+	const ADCSurvivalGameMode* GM = GetWorld()->GetAuthGameMode<ADCSurvivalGameMode>();
+	const float Rarity = GM ? GM->GetSandbox().LootRarity : 1.f;
 	for (const FDCLootRoll& Roll : LootTable)
 	{
-		if (Roll.Item && FMath::FRand() <= Roll.Chance)
+		if (Roll.Item && FMath::FRand() <= Roll.Chance * Rarity)
 		{
 			const int32 Amount = FMath::RandRange(Roll.MinCount, FMath::Max(Roll.MinCount, Roll.MaxCount));
 			Inventory->AddItem(Roll.Item, Amount);

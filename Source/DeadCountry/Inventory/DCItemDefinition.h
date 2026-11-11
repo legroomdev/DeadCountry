@@ -67,6 +67,56 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Use", meta = (EditCondition = "bConsumable"))
 	float EnergyRestore = 0.f;
 
+	// --- Equipping (weapons, tools) ---
+
+	/** Actor spawned in the survivor's hands when this item is equipped. None = not equippable. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equip")
+	TSubclassOf<class ADCEquippable> EquipClass;
+
+	/** Durability. 0 = never wears out. Each instance tracks its own condition. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equip", meta = (ClampMin = 0))
+	float MaxCondition = 0.f;
+
+	// --- Melee (used when EquipClass is a melee weapon) ---
+
+	/** The skill that levels up (and boosts) when fighting with this. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee")
+	EDCSkill WeaponSkill = EDCSkill::LongBlunt;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee")
+	bool bBladed = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee")
+	float MeleeDamage = 25.f;
+
+	/** How far the swing reaches from the eyes (cm). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee")
+	float MeleeReach = 160.f;
+
+	/** Width of the swing (degrees). Wide swings can hit several zombies. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee")
+	float MeleeArcDegrees = 70.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee", meta = (ClampMin = 1))
+	int32 MeleeMaxTargets = 2;
+
+	/** Full swing time at skill 0 (seconds). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee")
+	float SwingSeconds = 0.8f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee")
+	float SwingStaminaCost = 9.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee", meta = (ClampMin = 0, ClampMax = 1))
+	float KnockdownChance = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee", meta = (ClampMin = 0, ClampMax = 1))
+	float CritChance = 0.08f;
+
+	/** Chance each hit wears the weapon by one point (Maintenance skill reduces it). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee", meta = (ClampMin = 0, ClampMax = 1))
+	float ConditionLossChance = 0.2f;
+
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override
 	{
 		return FPrimaryAssetId(TEXT("Item"), GetFName());

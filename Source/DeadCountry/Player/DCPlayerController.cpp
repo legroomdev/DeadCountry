@@ -2,7 +2,7 @@
 #include "Player/DCCharacter.h"
 #include "Health/DCHealthComponent.h"
 #include "AI/DCZombie.h"
-#include "Weapons/DCWeapon.h"
+#include "Weapons/DCEquippable.h"
 #include "Inventory/DCInventoryComponent.h"
 #include "TimerManager.h"
 #include "Survival/DCSurvivalGameMode.h"
@@ -168,6 +168,20 @@ void ADCPlayerController::DCSuicide()
 	}
 }
 
+void ADCPlayerController::DCUseSlot(int32 Slot)
+{
+	ADCCharacter* Raider = GetPawn<ADCCharacter>();
+	if (!Raider)
+	{
+		return;
+	}
+	const TArray<FDCInventoryEntry>& Entries = Raider->GetInventoryComponent()->GetEntries();
+	if (Entries.IsValidIndex(Slot - 1))
+	{
+		Raider->Server_UseItem(Entries[Slot - 1].EntryId);
+	}
+}
+
 void ADCPlayerController::DCArmsDebug(float Delay)
 {
 	FTimerHandle Handle;
@@ -208,8 +222,8 @@ void ADCPlayerController::TestFireOnce()
 		GetWorldTimerManager().ClearTimer(TestFireTimer);
 		return;
 	}
-	Raider->GetEquippedWeapon()->StartFire();
-	Raider->GetEquippedWeapon()->StopFire();
+	Raider->GetEquippedWeapon()->StartPrimary();
+	Raider->GetEquippedWeapon()->StopPrimary();
 }
 
 void ADCPlayerController::DCShotIn(float Seconds)

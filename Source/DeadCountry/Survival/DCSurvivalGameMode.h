@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "Survival/DCWorldSave.h"
 #include "DCSurvivalGameMode.generated.h"
 
 class UDCRegionDefinition;
@@ -43,6 +44,13 @@ public:
 	UFUNCTION(Exec)
 	void DCSaveWorld();
 
+	/**
+	 * This world's sandbox rules. Chosen when the world is created from URL options, e.g.
+	 *   ?World=Hard?ZombieSpeed=Sprinters?Population=2?Infection=1?Loot=0.5?DayLength=45?XP=1
+	 * and saved with the world (changing options later doesn't affect an existing world).
+	 */
+	const FDCSandboxSettings& GetSandbox() const;
+
 protected:
 	UPROPERTY(EditDefaultsOnly, Category = "World")
 	TObjectPtr<UDCRegionDefinition> Region;
@@ -66,6 +74,8 @@ protected:
 	void UpdateTimeScale();
 
 	void LoadWorldFromDisk();
+	void ParseSandboxOptions(const FString& Options);
+	void ApplyStartingPopulation();
 	void ApplyWorldState();
 	void CaptureWorldState();
 	void CaptureCharacter(APlayerController* PC);

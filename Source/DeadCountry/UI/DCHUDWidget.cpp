@@ -6,6 +6,8 @@
 #include "Inventory/DCInventoryComponent.h"
 #include "Inventory/DCItemDefinition.h"
 #include "Weapons/DCWeapon.h"
+#include "Weapons/DCEquippable.h"
+#include "Survival/DCSkillsComponent.h"
 #include "Survival/DCPlayerState.h"
 #include "Survival/DCSurvivalGameState.h"
 #include "Blueprint/WidgetTree.h"
@@ -171,7 +173,7 @@ void UDCHUDWidget::BuildTree()
 	InventoryHeader = MakeText(15, DCUI::Dust, true);
 	InvList->AddChildToVerticalBox(InventoryHeader);
 	UTextBlock* Hint = MakeText(11, DCUI::Dim);
-	Hint->SetText(NSLOCTEXT("DCHUD", "InvHint", "Press 1-9 to use an item"));
+	Hint->SetText(NSLOCTEXT("DCHUD", "InvHint", "Press 1-9 to use or equip an item"));
 	InvList->AddChildToVerticalBox(Hint)->SetPadding(FMargin(0.f, 2.f, 0.f, 8.f));
 	for (int32 i = 0; i < DCUI::MaxInventoryRows; ++i)
 	{
@@ -179,6 +181,14 @@ void UDCHUDWidget::BuildTree()
 		InvList->AddChildToVerticalBox(Row)->SetPadding(FMargin(0.f, 1.f));
 		InventoryRows.Add(Row);
 	}
+	SkillsText = MakeText(12, DCUI::Dust);
+	InvList->AddChildToVerticalBox(SkillsText)->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
+
+	// Condition bar under the weapon panel (melee weapons / tools)
+	ConditionBack = MakeBox(FLinearColor(0.f, 0.f, 0.f, 0.5f), 2.f, FMargin(0.f));
+	Place(ConditionBack, BottomRight, BottomRight, FVector2D(-28.f, -20.f), FVector2D(160.f, 5.f), FVector2D(1.f, 0.5f), false);
+	ConditionFill = MakeBox(FLinearColor(0.45f, 0.8f, 0.4f, 0.9f), 2.f, FMargin(0.f));
+	Place(ConditionFill, BottomRight, BottomRight, FVector2D(-188.f, -20.f), FVector2D(160.f, 5.f), FVector2D(0.f, 0.5f), false);
 	Place(InventoryPanel, TopCentre, TopCentre, FVector2D(110.f, 110.f), FVector2D::ZeroVector, FVector2D(0.f, 0.f), true);
 	InventoryPanel->SetVisibility(ESlateVisibility::Collapsed);
 
@@ -267,6 +277,8 @@ void UDCHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	}
 	if (!bShowGameplay)
 	{
+		ConditionBack->SetVisibility(ESlateVisibility::Collapsed);
+		ConditionFill->SetVisibility(ESlateVisibility::Collapsed);
 		Crosshair->SetVisibility(ESlateVisibility::Collapsed);
 		StaminaBack->SetVisibility(ESlateVisibility::Collapsed);
 		StaminaFill->SetVisibility(ESlateVisibility::Collapsed);
@@ -418,26 +430,46 @@ void UDCHUDWidget::UpdateBody(const ADCCharacter* Character)
 
 void UDCHUDWidget::UpdateWeapon(const ADCCharacter* Character)
 {
-	const ADCWeapon* Weapon = Character->GetEquippedWeapon();
-	if (!Weapon)
+	const ADCEquippable* Held = Character->GetEquippedWeapon();
+	if (!Held)
 	{
-		WeaponNameText->SetText(FText::GetEmpty());
+		WeaponNameText->SetText(NSLOCTEXT("DCHUD", "BareHands", "Bare hands"));
 		AmmoText->SetText(FText::GetEmpty());
-		ReserveText->SetText(FText::GetEmpty());
+		ReserveText->SetText(NSLOCTEXT("DCHUD", "BareHandsHint", "[LMB/RMB] shove   [Tab] equip a weapon"));
+		ConditionBack->SetVisibility(ESlateVisibility::Collapsed);
+		ConditionFill->SetVisibility(ESlateVisibility::Collapsed);
 		return;
 	}
-	WeaponNameText->SetText(Weapon->GetWeaponName());
-	if (Weapon->IsReloading())
+	WeaponNameText->SetText(Held->GetDisplayName());
+	AmmoText->SetText(FText::FromString(Held->GetHudPrimary()));
+	ReserveText->SetText(FText::FromString(Held->GetHudSecondary()));
+
+	FLinearColor Color = DCUI::Dust;
+	if (const ADCWeapon* Gun = Cast<ADCWeapon>(Held))
 	{
-		AmmoText->SetText(NSLOCTEXT("DCHUD", "Reloading", "Reloading"));
+		if (!Gun->IsReloading() && Gun->GetAmmoInMagazine() <= Gun->GetMagazineSize() / 4)
+		{
+			Color = SeverityColor(3);
+		}
 	}
-	else
+	const float Condition = Held->GetHudBarFraction();
+	const bool bBar = Condition >= 0.f;
+	ConditionBack->SetVisibility(bBar ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	ConditionFill->SetVisibility(bBar ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	if (bBar)
 	{
-		AmmoText->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"), Weapon->GetAmmoInMagazine(), Weapon->GetMagazineSize())));
-		const bool bLow = Weapon->GetAmmoInMagazine() <= Weapon->GetMagazineSize() / 4;
-		AmmoText->SetColorAndOpacity(FSlateColor(bLow ? SeverityColor(3) : DCUI::Dust));
+		if (UCanvasPanelSlot* FillSlot = Cast<UCanvasPanelSlot>(ConditionFill->Slot))
+		{
+			FillSlot->SetSize(FVector2D(160.f * Condition, 5.f));
+		}
+		ConditionFill->SetBrushColor(HealthColor(Condition));
+		if (Condition < 0.25f)
+		{
+			Color = SeverityColor(3);
+		}
 	}
-	ReserveText->SetText(FText::FromString(FString::Printf(TEXT("%d in reserve  [R] reload"), Weapon->GetReserveAmmo())));
+	AmmoText->SetColorAndOpacity(FSlateColor(Color));
+	AmmoText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", bBar ? 18 : 30));
 }
 
 void UDCHUDWidget::UpdateInventory(const ADCCharacter* Character, const ADCPlayerController* PC)
@@ -452,16 +484,32 @@ void UDCHUDWidget::UpdateInventory(const ADCCharacter* Character, const ADCPlaye
 	InventoryHeader->SetText(FText::FromString(FString::Printf(TEXT("BACKPACK  -  %.1f / %.0f kg"), Inventory->GetTotalWeight(), Character->GetOverweightThresholdKg())));
 
 	const TArray<FDCInventoryEntry>& Entries = Inventory->GetEntries();
+	const ADCEquippable* Held = Character->GetEquippedWeapon();
 	for (int32 i = 0; i < InventoryRows.Num(); ++i)
 	{
 		UTextBlock* Row = InventoryRows[i];
 		if (Entries.IsValidIndex(i) && Entries[i].Item)
 		{
-			const UDCItemDefinition* Item = Entries[i].Item;
-			Row->SetText(FText::FromString(FString::Printf(TEXT("%s%d.  %s  x%d   %.2f kg%s"),
-				i < 9 ? TEXT("") : TEXT(" "), i + 1, *Item->DisplayName.ToString(), Entries[i].Count, Item->WeightKg * Entries[i].Count,
-				Item->bConsumable ? TEXT("   [use]") : TEXT(""))));
-			Row->SetColorAndOpacity(FSlateColor(i < 9 ? FLinearColor::White : DCUI::Dim));
+			const FDCInventoryEntry& Entry = Entries[i];
+			const UDCItemDefinition* Item = Entry.Item;
+			const bool bInHand = Held && Held->GetEntryId() == Entry.EntryId;
+			FString Extra;
+			if (bInHand)                              Extra = TEXT("   [in hand]");
+			else if (Item->EquipClass)                Extra = TEXT("   [equip]");
+			else if (Item->bConsumable)               Extra = TEXT("   [use]");
+			if (Entry.Condition >= 0.f && Item->MaxCondition > 0.f)
+			{
+				Extra += FString::Printf(TEXT("  %d%%"), FMath::RoundToInt(100.f * Entry.Condition / Item->MaxCondition));
+			}
+			if (Entry.LoadedAmmo >= 0)
+			{
+				Extra += FString::Printf(TEXT("  (%d loaded)"), Entry.LoadedAmmo);
+			}
+			Row->SetText(FText::FromString(FString::Printf(TEXT("%s%d.  %s%s   %.2f kg%s"),
+				i < 9 ? TEXT("") : TEXT(" "), i + 1, *Item->DisplayName.ToString(),
+				Entry.Count > 1 ? *FString::Printf(TEXT(" x%d"), Entry.Count) : TEXT(""),
+				Item->WeightKg * Entry.Count, *Extra)));
+			Row->SetColorAndOpacity(FSlateColor(bInHand ? DCUI::Dust : (i < 9 ? FLinearColor::White : DCUI::Dim)));
 			Row->SetVisibility(ESlateVisibility::HitTestInvisible);
 		}
 		else if (i == 0)
@@ -475,4 +523,25 @@ void UDCHUDWidget::UpdateInventory(const ADCCharacter* Character, const ADCPlaye
 			Row->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
+
+	// Skills: everything you've started learning, with progress to the next level.
+	FString SkillLines = TEXT("SKILLS\n");
+	const UDCSkillsComponent* SkillComp = Character->GetSkillsComponent();
+	int32 Shown = 0;
+	for (int32 s = 0; s < static_cast<int32>(EDCSkill::MAX); ++s)
+	{
+		const EDCSkill Skill = static_cast<EDCSkill>(s);
+		if (SkillComp->GetXP(Skill) <= 0.f)
+		{
+			continue;
+		}
+		SkillLines += FString::Printf(TEXT("%s  %d  (%d%%)\n"), *UDCSkillsComponent::GetSkillName(Skill).ToString(),
+			SkillComp->GetLevel(Skill), FMath::RoundToInt(SkillComp->GetProgress(Skill) * 100.f));
+		++Shown;
+	}
+	if (Shown == 0)
+	{
+		SkillLines += TEXT("Nothing learned yet - fight, sneak and sprint to improve.");
+	}
+	SkillsText->SetText(FText::FromString(SkillLines.TrimEnd()));
 }

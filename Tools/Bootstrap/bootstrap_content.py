@@ -70,6 +70,37 @@ for name, (display, category, size, stack, kg, value, use) in ITEMS.items():
     for prop, val in (use or {}).items():
         a.set_editor_property(prop, val)
     items[name] = a
+
+# Weapons: equippable items. Melee stats live on the item; the P9's firearm stats live in its C++ class.
+Skill = unreal.DCSkill
+WEAPONS = {
+    # name: (display, (w,h), kg, $, equip class, mesh, extra properties)
+    "DA_P9": ("P9 Service Pistol", (2, 1), 0.9, 600, unreal.DCWeapon, None, {}),
+    "DA_CricketBat": ("Cricket Bat", (1, 4), 1.2, 80, unreal.DCMeleeWeapon, "/Game/Weapons/Melee/SM_Melee_CricketBat", dict(
+        weapon_skill=Skill.LONG_BLUNT, bladed=False, melee_damage=30.0, melee_reach=170.0, melee_arc_degrees=80.0,
+        melee_max_targets=2, swing_seconds=0.85, swing_stamina_cost=10.0, knockdown_chance=0.4, crit_chance=0.06,
+        max_condition=35.0, condition_loss_chance=0.25)),
+    "DA_Machete": ("Machete", (1, 3), 0.7, 150, unreal.DCMeleeWeapon, "/Game/Weapons/Melee/SM_Melee_Machete", dict(
+        weapon_skill=Skill.LONG_BLADE, bladed=True, melee_damage=38.0, melee_reach=150.0, melee_arc_degrees=60.0,
+        melee_max_targets=1, swing_seconds=0.7, swing_stamina_cost=8.0, knockdown_chance=0.15, crit_chance=0.15,
+        max_condition=25.0, condition_loss_chance=0.2)),
+}
+for name, (display, size, kg, value, cls, mesh, extra) in WEAPONS.items():
+    a = get_or_create_data_asset(ITEMS_PATH, name, unreal.DCItemDefinition)
+    a.set_editor_property("display_name", display)
+    a.set_editor_property("category", Cat.WEAPON)
+    a.set_editor_property("grid_size", unreal.IntPoint(size[0], size[1]))
+    a.set_editor_property("max_stack", 1)
+    a.set_editor_property("weight_kg", kg)
+    a.set_editor_property("base_value", value)
+    a.set_editor_property("consumable", False)
+    a.set_editor_property("equip_class", cls.static_class())
+    if mesh:
+        a.set_editor_property("world_mesh", eal.load_asset(mesh))
+    for prop, val in extra.items():
+        a.set_editor_property(prop, val)
+    items[name] = a
+
 eal.save_directory(ITEMS_PATH)
 unreal.log(f"[DC] {len(items)} item definitions ready")
 
@@ -233,7 +264,7 @@ container((300, -300, 25), "Till Safe", [
 container((-2600, 1200, 160), "Ute Tray", [
     roll("DA_CarBattery", 0.5), roll("DA_JerryCan", 0.6), roll("DA_Ammo308", 0.5, 5, 15), roll("DA_Ammo9mm", 0.7, 10, 20)])
 container((2500, 2000, 25), "Shed Toolbox", [
-    roll("DA_Ammo9mm", 0.8, 15, 30), roll("DA_Splint", 0.4), roll("DA_GoldNugget", 0.15)])
+    roll("DA_Ammo9mm", 0.8, 15, 30), roll("DA_Splint", 0.4), roll("DA_GoldNugget", 0.15), roll("DA_Machete", 0.6)])
 
 
 def loose(item, count, loc):
@@ -246,6 +277,7 @@ loose("DA_WaterBottle", 1, (-3500, 200, 20))
 loose("DA_Ammo9mm", 17, (-1800, 0, 20))
 loose("DA_Bandage", 1, (-600, -2000, 20))
 loose("DA_GoldNugget", 1, (2600, 2600, 20))
+loose("DA_Machete", 1, (-300, 450, 20))  # on the roadhouse counter
 
 
 # Zombies: a few around the roadhouse, a cluster in the shed, stragglers on the road

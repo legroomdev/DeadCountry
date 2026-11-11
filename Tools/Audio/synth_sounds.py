@@ -286,7 +286,63 @@ def zombie_attack():
 
 
 # ---------------------------------------------------------------------------
+# Melee
+# ---------------------------------------------------------------------------
+def swing_whoosh(heavy):
+    L = 0.45
+    t = t_axis(L)
+    n = noise(L)
+    # band-passed air that sweeps up then down in pitch, peaking mid-swing
+    seg = len(n) // 8
+    centres = [500, 800, 1200, 1700, 1500, 1100, 750, 500] if not heavy else [300, 450, 700, 950, 850, 600, 420, 300]
+    swoosh = np.concatenate([bp(n[i * seg:(i + 1) * seg], f, 1.4) for i, f in enumerate(centres)])
+    env = np.exp(-((t[:len(swoosh)] - 0.17) / 0.07) ** 2)
+    return finish(pad(swoosh * env, L), -6)
+
+
+def hit_blunt():
+    out = np.zeros(int(SR * 0.6))
+    thock = ring([rng.uniform(380, 460), rng.uniform(820, 940), rng.uniform(1500, 1700)], 0.15, [0.03, 0.02, 0.012], [1, 0.5, 0.3])
+    place(out, thock, 0.0, 0.9)
+    place(out, lp(noise(0.09), 260) * env_exp(int(SR * 0.09), 0.025), 0.0, 1.0)   # body impact
+    place(out, impact_flesh(), 0.005, 0.45)
+    return finish(out, -2, drive=1.6)
+
+
+def hit_blade():
+    out = np.zeros(int(SR * 0.5))
+    place(out, hp(noise(0.05), 2500) * env_exp(int(SR * 0.05), 0.012), 0.0, 0.7)  # slice
+    place(out, ring([2900, 4700], 0.2, [0.04, 0.03], [0.3, 0.2]), 0.0, 0.4)
+    place(out, impact_flesh(), 0.0, 0.9)
+    return finish(out, -2, drive=1.4)
+
+
+def shove():
+    out = np.zeros(int(SR * 0.4))
+    place(out, lp(noise(0.12), 500) * env_exp(int(SR * 0.12), 0.035, attack=0.01), 0.0, 1.0)  # cloth/body thump
+    place(out, bp(noise(0.2), 900, 1.0) * env_exp(int(SR * 0.2), 0.05), 0.02, 0.3)
+    return finish(out, -4)
+
+
+def weapon_break():
+    out = np.zeros(int(SR * 0.8))
+    for i in range(6):  # splintering cracks
+        crack = hp(noise(0.02), 1500) * env_exp(int(SR * 0.02), 0.004)
+        place(out, crack, 0.01 + i * rng.uniform(0.02, 0.06), rng.uniform(0.4, 1.0))
+    place(out, ring([300, 640, 1150], 0.4, [0.08, 0.05, 0.03], [0.6, 0.4, 0.3]), 0.0, 0.5)
+    return finish(out, -2, drive=1.5)
+
+
+# ---------------------------------------------------------------------------
 print(f"[DCAUDIO] writing to {os.path.abspath(OUT)}")
+for i in range(3):
+    save(f"SW_Melee_Swing_{i + 1:02d}", swing_whoosh(i == 2))
+for i in range(3):
+    save(f"SW_Melee_HitBlunt_{i + 1:02d}", hit_blunt())
+for i in range(2):
+    save(f"SW_Melee_HitBlade_{i + 1:02d}", hit_blade())
+save("SW_Shove", shove())
+save("SW_WeaponBreak", weapon_break())
 for i in range(3):
     save(f"SW_Gunshot_P9_{i + 1:02d}", gunshot(i))
 save("SW_DryFire", dry_fire())
