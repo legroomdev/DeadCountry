@@ -1,0 +1,24 @@
+# Unreal generated
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+.vs/
+.vscode/
+.idea/
+*.sln
+*.slnx
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Plugins build output
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Blender autosave backups
+*.blend1
+
