@@ -56,6 +56,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Sleep")
 	bool IsSleeping() const { return bSleeping; }
 
+	/** Carry weight above which you slow down. */
+	float GetOverweightThresholdKg() const { return OverweightKg; }
+
+	/** Debug: logs the first-person arm animation state and key bone positions. */
+	void LogArmsDebug() const;
+
 	/** World save support. Write is const; Read runs on the server after BeginPlay. */
 	void WriteSaveData(FDCSavedCharacter& Out) const;
 	void ReadSaveData(const FDCSavedCharacter& In);
@@ -87,9 +93,47 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
 
-	/** Placeholder body so other players can see you. Hidden from the owner. */
+	/**
+	 * First-person arms (owner only). Plays a two-handed pistol pose and is re-placed every frame so the
+	 * right hand sits on the weapon's grip - the arms follow ADS, recoil and reloads automatically, and the
+	 * rest of the body ends up behind the camera.
+	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UStaticMeshComponent> PlaceholderBody;
+	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Art")
+	TObjectPtr<class UAnimSequence> ArmsIdleAnim;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Art")
+	TObjectPtr<class UAnimSequence> ArmsReloadAnim;
+
+	/** Third-person locomotion for other players' view of you. */
+	UPROPERTY(EditDefaultsOnly, Category = "Art")
+	TObjectPtr<class UAnimSequence> BodyIdleAnim;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Art")
+	TObjectPtr<class UAnimSequence> BodyWalkAnim;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Art")
+	TObjectPtr<class UAnimSequence> BodyJogAnim;
+
+	/** Mesh-space nudge applied to the hand anchor (cm) - for lining fingers up with the grip. */
+	UPROPERTY(EditDefaultsOnly, Category = "Art")
+	FVector ArmsGripOffset = FVector::ZeroVector;
+
+	/** Rotation from weapon space to arms mesh space (mannequin faces +Y). */
+	UPROPERTY(EditDefaultsOnly, Category = "Art")
+	FRotator ArmsRotationOffset = FRotator(0.f, -90.f, 0.f);
+
+	void UpdateFirstPersonArms();
+	void UpdateThirdPersonBody();
+	FName GetHandAnchorName(const USkeletalMeshComponent* SkelMesh) const;
+
+	UPROPERTY(Transient)
+	TObjectPtr<class UAnimSequence> CurrentArmsAnim;
+
+	UPROPERTY(Transient)
+	TObjectPtr<class UAnimSequence> CurrentBodyAnim;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDCHealthComponent> Health;
@@ -140,7 +184,7 @@ protected:
 
 	/** Weapon placement relative to the camera at the hip (weapon origin = rear of the slide). */
 	UPROPERTY(EditDefaultsOnly, Category = "Aiming")
-	FVector HipWeaponOffset = FVector(26.f, 10.f, -13.f);
+	FVector HipWeaponOffset = FVector(27.f, 9.5f, -11.f);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Aiming")
 	FRotator HipWeaponRotation = FRotator(1.5f, -4.f, 0.f);

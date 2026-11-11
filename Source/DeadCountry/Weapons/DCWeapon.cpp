@@ -215,6 +215,18 @@ void ADCWeapon::LocalFireShot()
 	Character->ApplyRecoil(RecoilPitch * Scale * FMath::FRandRange(0.85f, 1.15f), Yaw, RecoilRecoverFraction);
 }
 
+FTransform ADCWeapon::GetGripTransform() const
+{
+	static const FName GripSocket(TEXT("Grip"));
+	return FrameMesh->DoesSocketExist(GripSocket) ? FrameMesh->GetSocketTransform(GripSocket) : GetActorTransform();
+}
+
+FTransform ADCWeapon::GetGripLocalTransform() const
+{
+	static const FName GripSocket(TEXT("Grip"));
+	return FrameMesh->DoesSocketExist(GripSocket) ? FrameMesh->GetSocketTransform(GripSocket, RTS_Component) : FTransform::Identity;
+}
+
 void ADCWeapon::GetVisualRecoil(float AimAlpha, FVector& OutLocation, FRotator& OutRotation) const
 {
 	OutLocation = FVector::ZeroVector;

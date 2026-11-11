@@ -61,6 +61,10 @@ public:
 	UFUNCTION(Exec)
 	void DCSuicide();
 
+	/** Debug console command: DCArmsDebug [delay] logs first-person arm pose data. */
+	UFUNCTION(Exec)
+	void DCArmsDebug(float Delay = 0.f);
+
 	/** Debug console command: DCSpawnZombie [distance cm] spawns a zombie in front of you (host only). */
 	UFUNCTION(Exec)
 	void DCSpawnZombie(float Distance = 400.f);

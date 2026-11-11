@@ -168,6 +168,18 @@ void ADCPlayerController::DCSuicide()
 	}
 }
 
+void ADCPlayerController::DCArmsDebug(float Delay)
+{
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		if (const ADCCharacter* Raider = GetPawn<ADCCharacter>())
+		{
+			Raider->LogArmsDebug();
+		}
+	}), FMath::Max(0.05f, Delay), false);
+}
+
 void ADCPlayerController::DCSpawnZombie(float Distance)
 {
 	const APawn* MyPawn = GetPawn();
@@ -205,7 +217,7 @@ void ADCPlayerController::DCShotIn(float Seconds)
 	FTimerHandle Handle;
 	GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
-		ConsoleCommand(TEXT("HighResShot 1"));
+		ConsoleCommand(TEXT("shot showui")); // includes the UMG HUD (HighResShot is scene-only)
 	}), FMath::Max(0.1f, Seconds), false);
 }
 

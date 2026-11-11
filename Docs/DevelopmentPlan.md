@@ -48,7 +48,7 @@ Milestones are a guide, not a schedule. Each ends with something you can **play 
 **Source control:** git + LFS, backed up to the private repo github.com/legroomdev/DeadCountry (first push 2026-11-11).
 **Still to do:** playtest sleep (Z) in-game; multiplayer PIE check of save/respawn.
 
-Debug console commands: `DCSetHour <h>`, `DCSuicide`, `DCSaveWorld`, `DCForceAim 1`, `DCShotIn <s>`, `DCSpawnZombie [cm]`, `DCTestFire <shots> [delay]`.
+Debug console commands: `DCSetHour <h>`, `DCSuicide`, `DCSaveWorld`, `DCForceAim 1`, `DCShotIn <s>`, `DCSpawnZombie [cm]`, `DCTestFire <shots> [delay]`, `DCArmsDebug [delay]`. (`DCShotIn` uses `shot showui` so the HUD is captured.)
 
 
 1. **Source control** — git + Git LFS, private GitHub repo as backup. *(Do this first.)*
@@ -69,7 +69,10 @@ Zombies use Manny/Quinn with a zombie skin, shamble/lurch/grab animations, per-b
 Synthesized placeholder audio (`Tools/Audio/synth_sounds.py` → `SourceArt/Audio`, imported by `Tools/Import/setup_m2_assets.py`):
 gunshot, dry fire, mag out/in, slide release, casing tinks, footsteps, impacts, zombie groan/alert/attack.
 VFX: muzzle flash cards + light, physics shell casings, bullet-hole and blood decals; debug tracers removed.
-**Round 2 next:** first-person arms, UMG HUD. **Later:** replace placeholder sounds and mannequin zombies with licensed assets.
+**Round 2 done (2026-11-11):** first-person mannequin arms locked to the P9 grip (two-handed pistol pose, reload clip);
+third-person mannequin body + pistol locomotion for other players; C++ UMG HUD (moodle-style status icons, body
+silhouette, ammo panel, stamina bar, clock, prompts, sleep/death/inventory overlays).
+**Still open for M2:** licensed sounds, zombie art and arms to replace placeholders; crawler state; ambience; exit-test playtest.
 
 1. **First-person arms** (licensed) holding the P9: fire, reload, ADS, slide lock, interact/pick-up animations.
 2. **Audio** — gunshots with outdoor tails, footsteps per surface, zombie groans/alerts, doors, ambience (cicadas by day, wind at night). MetaSounds.

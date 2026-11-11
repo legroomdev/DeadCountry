@@ -50,6 +50,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	FText GetWeaponName() const { return WeaponName; }
 
+	/** World transform of the grip (where the firing hand goes). */
+	FTransform GetGripTransform() const;
+
+	/** Grip relative to the weapon's own origin. */
+	FTransform GetGripLocalTransform() const;
+
+	float GetReloadSeconds() const { return ReloadSeconds; }
+
 	/** Cosmetic gun kick to add on top of the held pose. AimAlpha 0 = hip, 1 = ADS. */
 	void GetVisualRecoil(float AimAlpha, FVector& OutLocation, FRotator& OutRotation) const;
 

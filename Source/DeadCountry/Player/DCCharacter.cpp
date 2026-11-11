@@ -20,6 +20,9 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/DamageEvents.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimSequence.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
@@ -42,16 +45,37 @@ ADCCharacter::ADCCharacter(const FObjectInitializer& ObjectInitializer)
 	FirstPersonCamera->bUsePawnControlRotation = true;
 	FirstPersonCamera->SetFieldOfView(85.f);
 
-	PlaceholderBody = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlaceholderBody"));
-	PlaceholderBody->SetupAttachment(GetCapsuleComponent());
-	PlaceholderBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PlaceholderBody->SetOwnerNoSee(true);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (Cylinder.Succeeded())
-	{
-		PlaceholderBody->SetStaticMesh(Cylinder.Object);
-		PlaceholderBody->SetRelativeScale3D(FVector(0.6f, 0.6f, 1.76f));
-	}
+	// Epic mannequin placeholder art (swap for licensed survivor art later).
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> Manny(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> PistolAim(TEXT("/Game/Characters/Mannequins/Anims/Pistol/MF_Pistol_Idle_ADS.MF_Pistol_Idle_ADS"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> PistolReload(TEXT("/Game/Characters/Mannequins/Anims/Pistol/MM_Pistol_Reload.MM_Pistol_Reload"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> PistolWalk(TEXT("/Game/Characters/Mannequins/Anims/Pistol/Walk/MF_Pistol_Walk_Fwd.MF_Pistol_Walk_Fwd"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> PistolJog(TEXT("/Game/Characters/Mannequins/Anims/Pistol/Jog/MF_Pistol_Jog_Fwd.MF_Pistol_Jog_Fwd"));
+	ArmsIdleAnim = PistolAim.Object;
+	ArmsReloadAnim = PistolReload.Object;
+	BodyIdleAnim = PistolAim.Object;
+	BodyWalkAnim = PistolWalk.Object;
+	BodyJogAnim = PistolJog.Object;
+
+	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
+	FirstPersonArms->SetupAttachment(FirstPersonCamera);
+	FirstPersonArms->SetSkeletalMeshAsset(Manny.Object);
+	FirstPersonArms->SetOnlyOwnerSee(true);
+	FirstPersonArms->SetCastShadow(false);
+	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	FirstPersonArms->bOnlyOwnerSee = true;
+	FirstPersonArms->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+	// Full body for everyone else; the owner sees only the arms.
+	USkeletalMeshComponent* Body = GetMesh();
+	Body->SetSkeletalMeshAsset(Manny.Object);
+	Body->SetRelativeLocation(FVector(0.f, 0.f, -89.f));
+	Body->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	Body->SetOwnerNoSee(true);
+	Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Body->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	Body->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 
 	Health = CreateDefaultSubobject<UDCHealthComponent>(TEXT("Health"));
 	Survival = CreateDefaultSubobject<UDCSurvivalComponent>(TEXT("Survival"));
@@ -92,6 +116,12 @@ void ADCCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 void ADCCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// First-person arms: no head (it would sit over the camera) and no legs.
+	FirstPersonArms->HideBoneByName(TEXT("neck_01"), PBO_None);
+	FirstPersonArms->HideBoneByName(TEXT("thigh_l"), PBO_None);
+	FirstPersonArms->HideBoneByName(TEXT("thigh_r"), PBO_None);
+	FirstPersonArms->SetVisibility(IsLocallyControlled());
 
 	Health->OnHealthChanged.AddDynamic(this, &ADCCharacter::HandleStatusChanged);
 	Inventory->OnInventoryChanged.AddDynamic(this, &ADCCharacter::HandleStatusChanged);
@@ -367,6 +397,102 @@ void ADCCharacter::OnRep_Aiming()
 	UpdateMovementSpeed();
 }
 
+FName ADCCharacter::GetHandAnchorName(const USkeletalMeshComponent* SkelMesh) const
+{
+	static const FName GripSocket(TEXT("HandGrip_R"));
+	static const FName HandBone(TEXT("hand_r"));
+	return (SkelMesh && SkelMesh->DoesSocketExist(GripSocket)) ? GripSocket : HandBone;
+}
+
+void ADCCharacter::UpdateFirstPersonArms()
+{
+	if (!EquippedWeapon || !FirstPersonArms->GetSkinnedAsset())
+	{
+		FirstPersonArms->SetVisibility(false);
+		return;
+	}
+	FirstPersonArms->SetVisibility(!bSleeping);
+
+	// Pose: aiming idle, swapping to the reload clip (stretched to the weapon's reload time).
+	UAnimSequence* Want = (EquippedWeapon->IsReloading() && ArmsReloadAnim) ? ArmsReloadAnim : ArmsIdleAnim;
+	if (Want && Want != CurrentArmsAnim)
+	{
+		const bool bLoop = Want != ArmsReloadAnim;
+		FirstPersonArms->PlayAnimation(Want, bLoop);
+		if (!bLoop)
+		{
+			FirstPersonArms->SetPlayRate(Want->GetPlayLength() / FMath::Max(0.1f, EquippedWeapon->GetReloadSeconds()));
+		}
+		else
+		{
+			FirstPersonArms->SetPlayRate(1.f);
+		}
+		CurrentArmsAnim = Want;
+	}
+
+	// Place the whole arm mesh so its right hand lands on the grip, oriented with the gun.
+	// Orientation comes from the gun itself (FBX sockets carry an axis-conversion rotation); the socket gives position.
+	const FTransform Grip = EquippedWeapon->GetGripTransform();
+	const FQuat MeshRot = EquippedWeapon->GetActorQuat() * ArmsRotationOffset.Quaternion();
+	const FName Anchor = GetHandAnchorName(FirstPersonArms);
+	const FVector HandInMesh = FirstPersonArms->GetSocketTransform(Anchor, RTS_Component).GetLocation() + ArmsGripOffset;
+	FirstPersonArms->SetWorldLocationAndRotation(Grip.GetLocation() - MeshRot.RotateVector(HandInMesh), MeshRot);
+}
+
+void ADCCharacter::LogArmsDebug() const
+{
+	const USkeletalMeshComponent* Arms = FirstPersonArms;
+	UE_LOG(LogDC, Log, TEXT("[ArmsDebug] anim=%s playing=%d mode=%d anchor=%s"),
+		CurrentArmsAnim ? *CurrentArmsAnim->GetName() : TEXT("none"), Arms->IsPlaying() ? 1 : 0,
+		static_cast<int32>(Arms->GetAnimationMode()), *GetHandAnchorName(Arms).ToString());
+	for (const TCHAR* Bone : { TEXT("pelvis"), TEXT("spine_05"), TEXT("clavicle_r"), TEXT("upperarm_r"), TEXT("lowerarm_r"),
+		TEXT("hand_r"), TEXT("hand_l"), TEXT("HandGrip_R") })
+	{
+		const bool bSocket = Arms->DoesSocketExist(Bone);
+		const FTransform T = Arms->GetSocketTransform(Bone, RTS_Component);
+		UE_LOG(LogDC, Log, TEXT("[ArmsDebug]   %-12s exists=%d comp=%s scale=%s"), Bone, bSocket ? 1 : 0,
+			*T.GetLocation().ToCompactString(), *T.GetScale3D().ToCompactString());
+	}
+	UE_LOG(LogDC, Log, TEXT("[ArmsDebug] world=%s rot=%s camera=%s"), *Arms->GetComponentLocation().ToCompactString(),
+		*Arms->GetComponentRotation().ToCompactString(), *FirstPersonCamera->GetComponentLocation().ToCompactString());
+	UE_LOG(LogDC, Log, TEXT("[ArmsDebug] aiming=%d alpha=%.2f weaponRel=%s fov=%.1f"), bIsAiming ? 1 : 0, AimAlpha,
+		EquippedWeapon ? *EquippedWeapon->GetRootComponent()->GetRelativeLocation().ToCompactString() : TEXT("-"),
+		FirstPersonCamera->FieldOfView);
+}
+
+void ADCCharacter::UpdateThirdPersonBody()
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	const float Speed = GetVelocity().Size2D();
+	UAnimSequence* Want = BodyIdleAnim;
+	float Rate = 1.f;
+	if (Speed > 400.f && BodyJogAnim)
+	{
+		Want = BodyJogAnim;
+		Rate = FMath::Clamp(Speed / 420.f, 0.6f, 1.4f);
+	}
+	else if (Speed > 20.f && BodyWalkAnim)
+	{
+		Want = BodyWalkAnim;
+		Rate = FMath::Clamp(Speed / 170.f, 0.5f, 1.6f);
+	}
+	if (Want && Want != CurrentBodyAnim)
+	{
+		Body->PlayAnimation(Want, true);
+		CurrentBodyAnim = Want;
+	}
+	Body->SetPlayRate(Rate);
+
+	// Put the gun in the body's right hand (the mirror of the first-person solve).
+	if (EquippedWeapon)
+	{
+		const FTransform Hand = Body->GetSocketTransform(GetHandAnchorName(Body));
+		const FQuat GunRot = Body->GetComponentQuat() * ArmsRotationOffset.Quaternion().Inverse();
+		const FTransform GripLocal = EquippedWeapon->GetGripLocalTransform();
+		EquippedWeapon->GetRootComponent()->SetWorldLocationAndRotation(Hand.GetLocation() - GunRot.RotateVector(GripLocal.GetLocation()), GunRot);
+	}
+}
+
 void ADCCharacter::UpdateFootstepAudio(float DeltaSeconds)
 {
 	const UCharacterMovementComponent* Move = GetCharacterMovement();
@@ -462,6 +588,17 @@ void ADCCharacter::Tick(float DeltaSeconds)
 		UpdateRecoilRecovery(DeltaSeconds);
 	}
 	UpdateAimVisuals(DeltaSeconds);
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		if (IsLocallyControlled())
+		{
+			UpdateFirstPersonArms();
+		}
+		else
+		{
+			UpdateThirdPersonBody();
+		}
+	}
 	UpdateFootstepAudio(DeltaSeconds);
 
 	if (HasAuthority() && !IsDead())
